@@ -1,0 +1,9 @@
+# Sandi Bot
+sandi_bot.db
+*.db
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.log

@@ -1,0 +1,13 @@
+# Sandi Bot - senior-friendly: large text, high contrast
+[theme]
+primaryColor = "#1a365d"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f7fafc"
+textColor = "#2d3748"
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
