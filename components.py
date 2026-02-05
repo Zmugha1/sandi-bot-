@@ -27,7 +27,7 @@ HEADER_CSS = """
 def render_sandi_avatar(show_name: bool = True, status: str = "Ready to help"):
     """Sandi Bot avatar and header in sidebar."""
     st.markdown(HEADER_CSS, unsafe_allow_html=True)
-    st.markdown("👩‍💼")
+    st.markdown("🧢")
     if show_name:
         st.markdown('<p class="sandi-header">Sandi Bot</p>', unsafe_allow_html=True)
     st.markdown(f'<p class="sandi-status">{status}</p>', unsafe_allow_html=True)

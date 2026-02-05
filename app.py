@@ -29,7 +29,7 @@ from components import (
 # Page config - senior-friendly
 st.set_page_config(
     page_title="Sandi Bot – Coaching Command Center",
-    page_icon="👩‍💼",
+    page_icon="🧢",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -115,7 +115,7 @@ with st.sidebar:
         st.rerun()
 
 # ----- Main: Tabs -----
-st.title("👩‍💼 Sandi Bot – Coaching Command Center")
+st.title("🧢 Sandi Bot – Coaching Command Center")
 st.caption("100 prospects loaded. Use the sidebar to start a strategy session with Sandi.")
 
 tab1, tab2, tab3, tab4 = st.tabs(["Command Center", "Person Detail", "Similar Groups", "Patterns"])
