@@ -96,14 +96,22 @@ def on_start_session(prospect_id: str, name: str):
 
 
 def on_select_prospect(prospect_id: str):
+    """Set selected prospect and request tab switch. Do not set main_tab here (widget key)."""
     st.session_state.selected_prospect = prospect_id
-    st.session_state.active_tab = 1
-    tab_names = ["Today's Dashboard", "Coaching Session", "People Like Them", "Insights"]
-    st.session_state.main_tab = tab_names[1]
+    st.session_state.goto_tab_index = 1  # switch to Coaching Session on next run
 
 
 if not st.session_state.prospects:
     load_data()
+
+# Apply tab switch requested by "View full profile" (cannot set main_tab inside button callback)
+tab_names = ["Today's Dashboard", "Coaching Session", "People Like Them", "Insights"]
+if "goto_tab_index" in st.session_state:
+    idx = st.session_state.goto_tab_index
+    del st.session_state.goto_tab_index
+    st.session_state.main_tab = tab_names[idx]
+    st.session_state.active_tab = idx
+    st.rerun()
 
 prospects = st.session_state.prospects
 ml_model = st.session_state.ml_model
@@ -135,8 +143,9 @@ with st.sidebar:
         database.insert_chat_message(prospect_id, "assistant", response, None)
         st.rerun()
 
-# ---- Main: tab selector (radio; switch programmatically via on_select_prospect) ----
-tab_names = ["Today's Dashboard", "Coaching Session", "People Like Them", "Insights"]
+# ---- Main: tab selector (radio; switch via goto_tab_index from "View full profile") ----
+if "main_tab" not in st.session_state:
+    st.session_state.main_tab = tab_names[0]
 selected_tab = st.radio("", tab_names, key="main_tab", horizontal=True)
 st.session_state.active_tab = tab_names.index(selected_tab)
 
