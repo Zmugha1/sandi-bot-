@@ -1,43 +1,78 @@
 """
-Sandi Bot - UI components: avatar, customer entry form, radar chart,
-score bars (traffic colors), recommendation cards with feedback buttons.
+Sandi Bot - Visual coaching UI components.
+Warm coaching aesthetic: cards, kanban, score bars, script boxes, timeline, metrics.
 """
 import streamlit as st
 import pandas as pd
 import numpy as np
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Callable
 
-# Senior-friendly: large fonts, high contrast
-HEADER_CSS = """
+# ---- Design system ----
+COLORS = {
+    "push": "#2e7d32",
+    "nurture": "#f57c00",
+    "pause": "#c2185b",
+    "bg": "#fafafa",
+    "card": "#ffffff",
+    "text": "#2c3e50",
+    "accent": "#1976d2",
+}
+
+COACHING_CSS = """
 <style>
-.sandi-header { font-size: 42px; font-weight: 700; color: #1a365d; margin-bottom: 8px; }
-.sandi-status { font-size: 18px; color: #2d3748; }
-.sandi-body { font-size: 18px; line-height: 1.5; color: #2d3748; }
-.score-bar-green { background: #38a169; height: 24px; border-radius: 4px; }
-.score-bar-yellow { background: #d69e2e; height: 24px; border-radius: 4px; }
-.score-bar-red { background: #e53e3e; height: 24px; border-radius: 4px; }
-.recommend-card { padding: 16px; border-radius: 8px; margin: 8px 0; font-size: 18px; }
-.recommend-push { border-left: 6px solid #38a169; background: #f0fff4; }
-.recommend-nurture { border-left: 6px solid #d69e2e; background: #fffff0; }
-.recommend-pause { border-left: 6px solid #e53e3e; background: #fff5f5; }
+:root { --push: #2e7d32; --nurture: #f57c00; --pause: #c2185b; --bg: #fafafa; --card: #ffffff; --text: #2c3e50; --accent: #1976d2; }
+.sandi-coach .metric-card { background: #ffffff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 16px; }
+.sandi-coach .metric-number { font-size: 36px; font-weight: 700; color: #2c3e50; line-height: 1.2; }
+.sandi-coach .metric-label { font-size: 16px; color: #2c3e50; margin-top: 4px; }
+.sandi-coach .client-card { background: #ffffff; border-radius: 10px; padding: 14px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); margin-bottom: 10px; cursor: pointer; border-left: 4px solid #1976d2; min-height: 44px; display: flex; align-items: center; }
+.sandi-coach .client-card.push-border { border-left-color: #2e7d32; }
+.sandi-coach .client-card.nurture-border { border-left-color: #f57c00; }
+.sandi-coach .client-card.pause-border { border-left-color: #c2185b; }
+.sandi-coach .client-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.sandi-coach .score-bar-wrap { margin: 10px 0; }
+.sandi-coach .score-bar-label { font-size: 16px; color: #2c3e50; margin-bottom: 4px; }
+.sandi-coach .score-bar-track { background: #e0e0e0; border-radius: 6px; height: 20px; overflow: hidden; }
+.sandi-coach .score-bar-fill { height: 20px; border-radius: 6px; transition: width 0.3s; }
+.sandi-coach .script-box { background: #f5f5f5; border-radius: 8px; padding: 14px; font-size: 16px; color: #2c3e50; border-left: 4px solid #1976d2; margin: 8px 0; }
+.sandi-coach .timeline-step { display: inline-block; padding: 6px 12px; margin: 2px; border-radius: 8px; font-size: 14px; }
+.sandi-coach .timeline-current { background: #1976d2; color: white; font-weight: 700; }
+.sandi-coach .timeline-past { background: #e8f5e9; color: #2e7d32; }
+.sandi-coach .timeline-future { background: #f5f5f5; color: #9e9e9e; }
+.sandi-coach .action-card { padding: 20px; border-radius: 12px; color: white; font-size: 18px; font-weight: 700; }
+.sandi-coach .action-card.push { background: #2e7d32; }
+.sandi-coach .action-card.nurture { background: #f57c00; }
+.sandi-coach .action-card.pause { background: #c2185b; }
+.sandi-coach .sandi-header { font-size: 28px; font-weight: 700; color: #2c3e50; }
+.sandi-coach .sandi-body { font-size: 16px; line-height: 1.5; color: #2c3e50; }
+.sandi-coach button { min-height: 44px; }
 </style>
 """
 
+# Legacy alias for app that still references it
+HEADER_CSS = COACHING_CSS
 
+
+def first_name_only(full_name: Optional[str]) -> str:
+    """Return first name only for display. Never show prospect_id in UI."""
+    if not full_name or not isinstance(full_name, str):
+        return "Client"
+    return full_name.strip().split()[0] if full_name.strip() else "Client"
+
+
+def action_color(action: str) -> str:
+    return COLORS.get(action.lower(), COLORS["accent"])
+
+
+# ---- Avatar & form (keep for sidebar) ----
 def render_sandi_avatar(show_name: bool = True, status: str = "Ready to help"):
-    """Sandi Bot avatar and header in sidebar."""
-    st.markdown(HEADER_CSS, unsafe_allow_html=True)
+    st.markdown(COACHING_CSS, unsafe_allow_html=True)
     st.markdown("🧢")
     if show_name:
-        st.markdown('<p class="sandi-header">Sandi Bot</p>', unsafe_allow_html=True)
-    st.markdown(f'<p class="sandi-status">{status}</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sandi-coach sandi-header" style="font-size: 22px;">Sandi Bot</p>', unsafe_allow_html=True)
+    st.markdown(f'<p class="sandi-coach sandi-body" style="font-size: 16px;">{status}</p>', unsafe_allow_html=True)
 
 
 def render_customer_entry_form(on_start_callback=None):
-    """
-    Customer # and Name fields plus Start button.
-    Returns (prospect_id, name) from session or form; on_start_callback(prospect_id, name) called on Start.
-    """
     st.subheader("Strategy session")
     prospect_id = st.text_input("Customer #", placeholder="e.g. P001", key="sandi_customer_id")
     name = st.text_input("Name", placeholder="e.g. James Smith", key="sandi_customer_name")
@@ -56,37 +91,151 @@ def render_customer_entry_form(on_start_callback=None):
     )
 
 
+# ---- New components ----
+def render_insight_metric(number: int, label: str, trend: Optional[str] = None, key: str = "metric"):
+    """Big number card for dashboard (e.g. Ready for Decision count)."""
+    st.markdown(COACHING_CSS, unsafe_allow_html=True)
+    trend_html = f'<div class="metric-label">{trend}</div>' if trend else ""
+    st.markdown(
+        f'<div class="sandi-coach metric-card">'
+        f'<div class="metric-number">{number}</div>'
+        f'<div class="metric-label">{label}</div>{trend_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_client_card(
+    client: dict,
+    action: str,
+    on_click: Optional[Callable[[str], None]] = None,
+    key_prefix: str = "card",
+    show_subtitle: bool = True,
+):
+    """
+    Priority/coaching card: first name, persona, days, action badge.
+    on_click(prospect_id) called when user clicks the card (via button).
+    """
+    first = first_name_only(client.get("name"))
+    persona = client.get("persona", "Strategic")
+    comp = client.get("compartment", "Discovery")
+    days = client.get("compartment_days", 0)
+    pid = client.get("prospect_id", "")
+    action_lower = (action or "NURTURE").upper()
+    border = "push-border" if action_lower == "PUSH" else "nurture-border" if action_lower == "NURTURE" else "pause-border"
+    badge = "🎯" if action_lower == "PUSH" else "💡" if action_lower == "NURTURE" else "🌱"
+    subtitle = f"In stage {comp} for {days} days" + (" – might be stuck" if days > 21 and comp == "Exploration" else "") if show_subtitle else ""
+    with st.container():
+        st.markdown(f"**{first}** · {persona} · {badge} {action_lower}")
+        if show_subtitle and subtitle:
+            st.caption(subtitle)
+        if on_click and pid:
+            if st.button("👁️ View full profile", key=f"{key_prefix}_{pid}", type="secondary"):
+                on_click(pid)
+                st.rerun()
+
+
+def render_pipeline_kanban(
+    clients: List[dict],
+    get_action: Callable[[dict], str],
+    on_select: Callable[[str], None],
+    key_prefix: str = "kanban",
+):
+    """
+    5-column Kanban by stage. Each card shows first name, persona icon, days, action badge.
+    on_select(prospect_id) when user clicks View profile.
+    """
+    stages = ["Discovery", "Exploration", "Serious Consideration", "Decision Prep", "Commitment"]
+    cols = st.columns(5)
+    for idx, stage_name in enumerate(stages):
+        with cols[idx]:
+            st.markdown(f"**Stage: {stage_name}**")
+            in_stage = [c for c in clients if c.get("compartment") == stage_name]
+            for c in in_stage[:15]:  # cap per column
+                action = get_action(c)
+                first = first_name_only(c.get("name"))
+                days = c.get("compartment_days", 0)
+                pid = c.get("prospect_id", "")
+                badge = "🎯" if action == "PUSH" else "💡" if action == "NURTURE" else "🌱"
+                st.markdown(f"{first} · {badge} · {days}d")
+                if st.button("View", key=f"{key_prefix}_{pid}_{idx}", type="secondary"):
+                    on_select(pid)
+                    st.rerun()
+                st.markdown("---")
+
+
+def render_score_visual(score: int, label: str, note: Optional[str] = None, key_prefix: str = "score"):
+    """Single horizontal bar: label, score out of 5, optional note."""
+    v = max(0, min(5, int(score) if score is not None else 0))
+    pct = (v / 5.0) * 100
+    if v >= 4:
+        fill_color = COLORS["push"]
+    elif v >= 3:
+        fill_color = COLORS["nurture"]
+    else:
+        fill_color = COLORS["pause"]
+    st.markdown(f"**{label}**")
+    st.markdown(
+        f'<div class="sandi-coach score-bar-wrap">'
+        f'<div class="score-bar-track"><div class="score-bar-fill" style="width:{pct}%; background:{fill_color};"></div></div>'
+        f'<div class="sandi-coach sandi-body">{v}/5</div></div>',
+        unsafe_allow_html=True,
+    )
+    if note:
+        st.caption(note)
+
+
+def render_script_box(title: str, script_text: str, key: str = "script"):
+    """Copy-paste friendly script: expander with code block (user can select and copy)."""
+    with st.expander(f"📞 {title}", expanded=False):
+        st.code(script_text, language=None)
+        st.caption("Select the text above and copy (Ctrl+C) to use in your call.")
+
+
+def render_timeline(current_stage: str, days_in_stage: int, key_prefix: str = "timeline"):
+    """Visual 5-step progress: Discovery → ... → Commitment, current highlighted. Stuck warning if >21 days."""
+    steps = ["Discovery", "Exploration", "Serious Consideration", "Decision Prep", "Commitment"]
+    try:
+        idx = steps.index(current_stage)
+    except ValueError:
+        idx = 0
+    parts = []
+    for i, s in enumerate(steps):
+        if i == idx:
+            parts.append(f'<span class="timeline-step timeline-current">{s}</span>')
+        elif i < idx:
+            parts.append(f'<span class="timeline-step timeline-past">{s}</span>')
+        else:
+            parts.append(f'<span class="timeline-step timeline-future">{s}</span>')
+    st.markdown(COACHING_CSS, unsafe_allow_html=True)
+    st.markdown('<div class="sandi-coach">' + " → ".join(parts) + "</div>", unsafe_allow_html=True)
+    st.caption(f"Stage {idx + 1} of 5 · {days_in_stage} days in this stage.")
+    if days_in_stage > 21:
+        st.warning("⚠️ Over 21 days in this stage – consider a gentle nudge or pause.")
+
+
 def score_color(score: int) -> str:
-    """Traffic light: green >=4, yellow 3, red <=2."""
+    """For legacy compatibility; uses new palette."""
     if score >= 4:
-        return "#38a169"
+        return COLORS["push"]
     if score >= 3:
-        return "#d69e2e"
-    return "#e53e3e"
+        return COLORS["nurture"]
+    return COLORS["pause"]
 
 
 def render_score_bars(prospect: dict, key_prefix: str = "score"):
-    """Four horizontal score bars with traffic colors."""
+    """Four horizontal score bars (legacy + new style)."""
     dims = [
-        ("Identity", prospect.get("identity_score", 0)),
-        ("Commitment", prospect.get("commitment_score", 0)),
-        ("Financial", prospect.get("financial_score", 0)),
-        ("Execution", prospect.get("execution_score", 0)),
+        ("Identity", prospect.get("identity_score", 0), "Ownership vs blame"),
+        ("Commitment", prospect.get("commitment_score", 0), "Ability to decide"),
+        ("Financial", prospect.get("financial_score", 0), "Comfort with money"),
+        ("Execution", prospect.get("execution_score", 0), "Follow-through"),
     ]
-    for i, (label, val) in enumerate(dims):
-        v = max(0, min(5, int(val) if val is not None else 0))
-        pct = (v / 5.0) * 100
-        c = score_color(v)
-        st.markdown(f"**{label}**")
-        st.markdown(
-            f'<div style="background: #e2e8f0; border-radius: 4px; height: 24px;">'
-            f'<div style="width: {pct}%; background: {c}; height: 24px; border-radius: 4px;"></div></div>',
-            unsafe_allow_html=True,
-        )
+    for i, (label, val, note) in enumerate(dims):
+        render_score_visual(val, label, note, f"{key_prefix}_{i}")
 
 
 def render_radar_chart(prospect: dict, key: str = "radar"):
-    """Simple radar-style display of 4 dimensions (as bar or polar). Using plotly if available else text."""
+    """Plotly radar for 4 dimensions (kept for optional use)."""
     try:
         import plotly.graph_objects as go
     except Exception:
@@ -106,13 +255,15 @@ def render_radar_chart(prospect: dict, key: str = "radar"):
         theta=dims + [dims[0]],
         fill="toself",
         name="Scores",
-        line=dict(color="#3182ce"),
+        line=dict(color=COLORS["accent"]),
     ))
     fig.update_layout(
         polar=dict(radialaxis=dict(visible=True, range=[0, 5])),
         showlegend=False,
         margin=dict(l=80, r=80, t=40, b=40),
         height=280,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
     )
     st.plotly_chart(fig, use_container_width=True, key=key)
 
@@ -126,27 +277,31 @@ def render_recommendation_card(
     on_thumbs_down=None,
     key_prefix: str = "rec",
 ):
-    """Recommendation card with PUSH/NURTURE/PAUSE styling and 👍/👎 buttons."""
-    css_class = "recommend-push" if action == "PUSH" else "recommend-nurture" if action == "NURTURE" else "recommend-pause"
-    conf_text = f" ({int(round((confidence or 0) * 100))}% confidence)" if confidence is not None else ""
-    st.markdown(f'<div class="recommend-card {css_class}">**{action}**{conf_text}<br/><br/>{reason}</div>', unsafe_allow_html=True)
+    """Recommendation card with PUSH/NURTURE/PAUSE styling and 👍/👎 (touch-friendly)."""
+    action_lower = (action or "NURTURE").upper()
+    bg = COLORS["push"] if action_lower == "PUSH" else COLORS["nurture"] if action_lower == "NURTURE" else COLORS["pause"]
+    conf_pct = int(round((confidence or 0) * 100))
+    st.markdown(
+        f'<div class="sandi-coach action-card {action_lower.lower()}" style="background:{bg}; padding:20px; border-radius:12px; color:white; font-size:18px;">'
+        f'<strong>{action_lower}</strong> ({conf_pct}% confidence)</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(f"**Why:** {reason}")
     if script:
-        st.markdown("**Suggested script:**")
-        st.code(script, language=None)
-    col1, col2 = st.columns(2)
-    with col1:
+        render_script_box("Suggested script", script, f"{key_prefix}_script")
+    c1, c2 = st.columns(2)
+    with c1:
         if st.button("👍 Helpful", key=f"{key_prefix}_up"):
             if on_thumbs_up:
                 on_thumbs_up()
-    with col2:
+    with c2:
         if st.button("👎 Not helpful", key=f"{key_prefix}_down"):
             if on_thumbs_down:
                 on_thumbs_down()
 
 
 def render_chat_message(role: str, content: str, key: str = None):
-    """One chat bubble (user or assistant)."""
     if role == "user":
-        st.markdown(f'<p class="sandi-body" style="text-align:right; background:#e6fffa; padding:8px; border-radius:8px;">{content}</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="sandi-coach sandi-body" style="text-align:right; background:#e3f2fd; padding:10px; border-radius:8px;">{content}</p>', unsafe_allow_html=True)
     else:
-        st.markdown(f'<p class="sandi-body" style="background:#f7fafc; padding:8px; border-radius:8px;">{content}</p>', unsafe_allow_html=True)
+        st.markdown(f'<p class="sandi-coach sandi-body" style="background:#f5f5f5; padding:10px; border-radius:8px;">{content}</p>', unsafe_allow_html=True)
