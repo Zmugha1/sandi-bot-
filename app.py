@@ -83,23 +83,18 @@ def load_data():
 
 
 def on_start_session(prospect_id: str, name: str):
+    """Load prospect into session. Do not set sandi_customer_id/sandi_customer_name here (widget keys)."""
     load_data()
     prospect = database.get_prospect(prospect_id)
     if prospect:
         st.session_state.current_prospect = prospect
         st.session_state.sandi_prospect_id = prospect_id
-        # Use DB name so displayed name is always correct
         db_name = prospect.get("name") or name
         st.session_state.sandi_prospect_name = db_name
-        # Sync form fields so sidebar shows loaded Customer # and name
-        st.session_state.sandi_customer_id = prospect_id
-        st.session_state.sandi_customer_name = db_name
     else:
         st.session_state.current_prospect = None
         st.session_state.sandi_prospect_id = prospect_id
         st.session_state.sandi_prospect_name = name
-        st.session_state.sandi_customer_id = prospect_id
-        st.session_state.sandi_customer_name = name
 
 
 def on_select_prospect(prospect_id: str):

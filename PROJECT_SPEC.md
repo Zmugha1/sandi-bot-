@@ -220,7 +220,7 @@ Persona drives which tactics/scripts are shown (see `sandi_bot.TACTICS_DB`).
 - **Startup:** `load_data()` → ensure synthetic data, load prospects, fit ML model.
 - **Sidebar:**  
   - Sandi avatar.  
-  - Customer # and Name inputs + Start ▶ (loads prospect into `current_prospect`). After Start, form fields are updated to show the loaded Customer # and **name from the database** (canonical name).  
+  - Customer # and Name inputs + Start ▶ (loads prospect into `current_prospect`). After Start, **Current session** shows the loaded Customer # and **name from the database** (canonical name). Form input values are not overwritten by the callback (Streamlit widget-key constraint).  
   - **Current session:** When a session is loaded, a line displays **Customer #** and **Name** (e.g. `Current session: P001 · William Williams`). Name comes from the DB when the prospect is found, so the displayed name is always correct.  
   - Chat history (user/assistant bubbles).  
   - Chat input → `natural_sandi_bot.simple_chat_response(question, prospect, history)`; append to history and DB.
