@@ -88,11 +88,18 @@ def on_start_session(prospect_id: str, name: str):
     if prospect:
         st.session_state.current_prospect = prospect
         st.session_state.sandi_prospect_id = prospect_id
-        st.session_state.sandi_prospect_name = prospect.get("name") or name
+        # Use DB name so displayed name is always correct
+        db_name = prospect.get("name") or name
+        st.session_state.sandi_prospect_name = db_name
+        # Sync form fields so sidebar shows loaded Customer # and name
+        st.session_state.sandi_customer_id = prospect_id
+        st.session_state.sandi_customer_name = db_name
     else:
         st.session_state.current_prospect = None
         st.session_state.sandi_prospect_id = prospect_id
         st.session_state.sandi_prospect_name = name
+        st.session_state.sandi_customer_id = prospect_id
+        st.session_state.sandi_customer_name = name
 
 
 def on_select_prospect(prospect_id: str):
@@ -125,6 +132,12 @@ with st.sidebar:
     )
     prospect_id, prospect_name = render_customer_entry_form(on_start_callback=on_start_session)
     current = st.session_state.current_prospect
+    # Show loaded customer number and name (from DB when available so name is always correct)
+    if prospect_id or current:
+        sid = prospect_id or (current.get("prospect_id") if current else "")
+        sname = (current.get("name") if current else None) or prospect_name or ""
+        if sid or sname:
+            st.markdown(f"**Current session:** {sid} · **{sname}**")
     st.divider()
     st.subheader("Chat with Sandi")
     for msg in st.session_state.chat_messages:
@@ -219,6 +232,7 @@ elif selected_tab == "Coaching Session":
         if p:
             first = first_name_only(p.get("name"))
             st.subheader(f"👤 {p.get('name', first)}")
+            st.markdown(f"**Customer #:** {p.get('prospect_id', '—')} · **Name:** {p.get('name', '—')}")
             st.markdown(f"**{p.get('persona', 'Strategic')}** · Current stage: **{p.get('compartment', 'Discovery')}**")
             left, right = st.columns([2, 3])
             with left:

@@ -220,14 +220,15 @@ Persona drives which tactics/scripts are shown (see `sandi_bot.TACTICS_DB`).
 - **Startup:** `load_data()` → ensure synthetic data, load prospects, fit ML model.
 - **Sidebar:**  
   - Sandi avatar.  
-  - Customer # and Name + Start ▶ (loads prospect into `current_prospect`).  
+  - Customer # and Name inputs + Start ▶ (loads prospect into `current_prospect`). After Start, form fields are updated to show the loaded Customer # and **name from the database** (canonical name).  
+  - **Current session:** When a session is loaded, a line displays **Customer #** and **Name** (e.g. `Current session: P001 · William Williams`). Name comes from the DB when the prospect is found, so the displayed name is always correct.  
   - Chat history (user/assistant bubbles).  
   - Chat input → `natural_sandi_bot.simple_chat_response(question, prospect, history)`; append to history and DB.
 - **Main area:**  
-  - **Tab 1 – Command Center:** Table of prospects (id, name, persona, compartment, conversion %).  
-  - **Tab 2 – Person Detail:** Select prospect → score bars, radar, persona/compartment/days, conversion %, advancement note, recommendation card (from `sandi_bot.get_recommendation` + `get_tactics`) with 👍/👎 (persisted via `database.insert_feedback`).  
-  - **Tab 3 – Similar Groups:** Pick reference prospect → table of most similar (from `ml_model.get_similar_prospects`).  
-  - **Tab 4 – Patterns:** Aggregates by persona and by compartment (counts, avg conversion).
+  - **Tab 1 – Today's Dashboard:** Metric cards, Pipeline (by stage) or Priority stack, client cards with “View full profile” (switches to Tab 2).  
+  - **Tab 2 – Coaching Session:** Select client (by first name). Header shows **Customer #** and **Name** for the selected client (from DB). Timeline, playbook, readiness bars, script boxes, recommendation card with 👍/👎.  
+  - **Tab 3 – People Like Them:** Hero card + similar clients grid; insight box.  
+  - **Tab 4 – Insights:** Charts (where people get stuck, persona distribution, success indicators, momentum); Sandi’s insights text.
 
 ---
 
@@ -242,10 +243,15 @@ Persona drives which tactics/scripts are shown (see `sandi_bot.TACTICS_DB`).
 ### 6.2 Strategy session and chat
 
 1. User enters **Customer #** (e.g. P001) and **Name** in sidebar, clicks **Start ▶**.
-2. App loads prospect from DB into `current_prospect` and shows “Ready to help” in avatar.
+2. App loads prospect from DB into `current_prospect`. The **name is taken from the database** when the prospect exists, so the displayed name updates to the canonical record (e.g. “William Williams”). Form fields are synced to show the loaded Customer # and name. Sidebar shows **Current session: [Customer #] · [Name]**.
 3. User types in chat (e.g. “Should I push or pause?” or “Help me plan my next call with the customer”).
 4. App calls `simple_chat_response(question, current_prospect, chat_messages)` and appends response to history and to `chat_history` table.
 5. No API key is required; all chat is SimpleSandiBot.
+
+### 6.2.2 Customer number and name display
+
+- **Sidebar:** After a session is started, **Current session** shows Customer # and Name. Name is from the database when the prospect is found, so it stays correct even if the user typed a different spelling.
+- **Coaching Session tab:** The selected client’s **Customer #** and **Name** are shown under the client header (from the DB), so it is always clear who is being viewed and the name matches the record.
 
 ### 6.2.1 Call planning (demo highlight)
 
