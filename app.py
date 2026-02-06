@@ -17,7 +17,6 @@ import database
 import synthetic_data
 import ml_models
 import sandi_bot
-import config
 import natural_sandi_bot
 from components import (
     render_sandi_avatar,
@@ -50,8 +49,6 @@ if "sandi_prospect_name" not in st.session_state:
     st.session_state.sandi_prospect_name = None
 if "current_prospect" not in st.session_state:
     st.session_state.current_prospect = None
-if "openai_api_key" not in st.session_state:
-    st.session_state.openai_api_key = None
 
 
 def load_data():
@@ -89,30 +86,6 @@ with st.sidebar:
         show_name=True,
         status="Ready to help" if st.session_state.sandi_prospect_id else "Enter customer to start",
     )
-    # API key (session-only, masked)
-    st.subheader("OpenAI API key (optional)")
-    api_key_placeholder = st.empty()
-    existing_key = config.get_api_key_from_session(st.session_state)
-    key_input = api_key_placeholder.text_input(
-        "Paste your key (starts with sk-)",
-        value="",
-        type="password",
-        placeholder="sk-...",
-        key="openai_key_input",
-    )
-    if key_input:
-        if config.validate_openai_key(key_input):
-            config.set_api_key_in_session(st.session_state, key_input)
-            st.caption("Key saved for this session.")
-        else:
-            st.caption("Key should start with sk-. Get one at platform.openai.com")
-    if existing_key and not key_input:
-        st.caption("Using stored key for this session.")
-    if st.button("Clear key", key="clear_key_btn"):
-        config.set_api_key_in_session(st.session_state, None)
-        st.rerun()
-    st.divider()
-
     prospect_id, prospect_name = render_customer_entry_form(on_start_callback=on_start_session)
     current = st.session_state.current_prospect
 
@@ -133,19 +106,11 @@ with st.sidebar:
     user_input = st.chat_input("Ask Sandi...")
     if user_input:
         st.session_state.chat_messages.append({"role": "user", "content": user_input})
-        api_key = config.get_api_key_from_session(st.session_state)
-        if api_key:
-            response = natural_sandi_bot.natural_response(
-                user_input,
-                api_key,
-                prospect=current,
-                chat_history=st.session_state.chat_messages[:-1],
-            )
-        else:
-            intent = sandi_bot.detect_intent(user_input)
-            response, action, confidence, script_snippet, tactics_list = sandi_bot.generate_response(
-                intent, current, prospect_id, prospect_name
-            )
+        response = natural_sandi_bot.simple_chat_response(
+            user_input,
+            prospect=current,
+            history=st.session_state.chat_messages[:-1],
+        )
         st.session_state.chat_messages.append({"role": "assistant", "content": response})
         database.insert_chat_message(prospect_id, "user", user_input)
         database.insert_chat_message(prospect_id, "assistant", response, None)

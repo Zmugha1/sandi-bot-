@@ -1,10 +1,43 @@
 """
-Sandi Bot - Natural LLM conversation using OpenAI GPT-3.5-turbo.
-Warm, human-like coaching (no robotic templates).
+Sandi Bot - Chat: SimpleSandiBot (no API key) + optional OpenAI fallback.
 """
 from typing import Optional, List, Dict, Any
 
-# Lazy import so app runs without openai if not used
+
+class SimpleSandiBot:
+    """Rule-based Sandi - no OpenAI key needed."""
+
+    def generate_response(self, question: str, prospect: Optional[dict] = None, history=None) -> str:
+        prospect = prospect or {}
+        name = prospect.get("name", "them")
+        days = prospect.get("days_in_compartment", prospect.get("compartment_days", 0))
+
+        q = (question or "").lower()
+        if "push" in q:
+            if days > 21:
+                return f"I'd actually PAUSE with {name}. {days} days is too long - let them breathe for 2 weeks."
+            else:
+                return f"Yes, push {name}! They're ready. Schedule the decision call this week."
+        elif "homework" in q:
+            return f"Give {name} ONE specific thing with a deadline. Like: 'Send me your top 3 concerns by Friday.'"
+        elif "pause" in q:
+            return f"Step back for 2 weeks. If {name} doesn't reach out, they weren't going to convert anyway."
+        else:
+            return f"I'd keep nurturing {name}. They're warming up but need more time. What specifically are you unsure about?"
+
+
+# Use this for chat (no API key required)
+sandi_bot_simple = SimpleSandiBot()
+
+
+def simple_chat_response(question: str, prospect: Optional[dict] = None, history=None) -> str:
+    """Use SimpleSandiBot for chat. No OpenAI key needed."""
+    if not (question or "").strip():
+        return "What would you like to know?"
+    return sandi_bot_simple.generate_response(question, prospect, history)
+
+
+# --- Optional OpenAI (kept for reference; not used when SimpleSandiBot is active)
 def _client(api_key: str):
     import openai
     return openai.OpenAI(api_key=api_key)
