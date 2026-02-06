@@ -100,14 +100,14 @@ def on_start_session(prospect_id: str, name: str):
 def on_select_prospect(prospect_id: str):
     """Set selected prospect and request tab switch. Do not set main_tab here (widget key)."""
     st.session_state.selected_prospect = prospect_id
-    st.session_state.goto_tab_index = 1  # switch to Coaching Session on next run
+    st.session_state.goto_tab_index = 2  # switch to Coaching Session on next run (index in tab_names)
 
 
 if not st.session_state.prospects:
     load_data()
 
 # Apply tab switch requested by "View full profile" (cannot set main_tab inside button callback)
-tab_names = ["Today's Dashboard", "Coaching Session", "People Like Them", "Insights"]
+tab_names = ["How to use", "Today's Dashboard", "Coaching Session", "People Like Them", "Insights"]
 if "goto_tab_index" in st.session_state:
     idx = st.session_state.goto_tab_index
     del st.session_state.goto_tab_index
@@ -160,8 +160,115 @@ st.session_state.active_tab = tab_names.index(selected_tab)
 st.title("🧢 Sandi Bot – Coaching Command Center")
 st.caption("Your pipeline at a glance. Use the sidebar to start a strategy session with Sandi.")
 
+# ---- Tab 0: How to use this dashboard ----
+if selected_tab == "How to use":
+    st.header("📖 How to use this dashboard")
+    st.markdown("Follow these steps to get the most from Sandi Bot. Use the **sidebar** on the left and the **tabs** at the top.")
+    st.markdown("---")
+    st.subheader("🧢 1. Start a strategy session (sidebar)")
+    st.markdown("""
+    - In the **left sidebar**, find **Strategy session**.
+    - Enter **Customer #** (e.g. `P001`, `P086`).
+    - Enter **Name** (e.g. the client’s full name).
+    - Click **Start ▶**.
+    - You will see **Current session: [Customer #] · [Name]** once loaded. The name comes from the system so it stays correct.
+    - Sandi is then ready for chat. You can ask things like *Should I push or pause?* or *Help me plan my next call with the customer.*
+    """)
+    st.markdown("---")
+    st.subheader("💬 2. Chat with Sandi (sidebar)")
+    st.markdown("""
+    - Below the strategy session you’ll see **Chat with Sandi**.
+    - Type in the chat box and press Enter.
+    - **Good questions to ask:**
+      - *Should I push or pause?*
+      - *What homework should I give them?*
+      - *Help me plan my next call with the customer.*
+      - *What should I say on the call?*
+    - Sandi uses the **current session** client. Load a customer first with **Start ▶** if you see a message asking you to.
+    """)
+    st.markdown("---")
+    st.subheader("📊 3. Today’s Dashboard tab")
+    st.markdown("""
+    - At the top, click **Today's Dashboard** to see your pipeline.
+    - **Three metric cards** at the top:
+      - **🎯 Ready for Decision** – number of clients where the system suggests PUSH (call today).
+      - **💡 Need Nurturing** – number where it suggests NURTURE (keep engaging, assign homework).
+      - **⚠️ Stuck >21 days** – clients in Exploration for more than 21 days (may need a nudge or pause).
+    - **View:** Choose **Pipeline (by stage)** or **Priority stack**.
+      - **Pipeline (by stage):** Five columns (Discovery → … → Commitment). Each client has a **View** button; click it to open their Coaching Session.
+      - **Priority stack:** List of PUSH + NURTURE clients, sorted by time in stage. Each card has **👁️ View full profile** – click to go to Coaching Session for that client.
+    - **Show today's priorities only:** Check this to hide PAUSE clients and focus on people to act on.
+    """)
+    st.markdown("---")
+    st.subheader("👤 4. Coaching Session tab")
+    st.markdown("""
+    - Click **Coaching Session** to work with one client in detail.
+    - **Select client** from the dropdown (shown by first name).
+    - You’ll see **Customer #** and **Name** at the top so you know who you’re viewing.
+    - **The story so far:** A timeline shows their stage (Discovery → … → Commitment). If they’ve been in a stage over 21 days, you’ll see a short warning.
+    - **Today’s playbook:**
+      - **Action:** 🎯 PUSH, 💡 NURTURE, or 🌱 PAUSE with a **confidence %**.
+      - **Why this action** – short plain-English reason.
+      - **📞 Suggested script** – expand the section to see opening line, if they resist, and closing/homework. Select the text and copy to use on your call.
+    - **Readiness:** Four bars – **Identity**, **Commitment**, **Financial**, **Execution** (each 1–5 with a short note).
+    - **👍 Helpful / 👎 Not helpful** – see the section below for how to use these.
+    """)
+    st.markdown("---")
+    st.subheader("👍 Helpful and 👎 Not helpful")
+    st.markdown("""
+    On the **Coaching Session** tab, under the recommendation (PUSH / NURTURE / PAUSE), you’ll see two buttons:
+
+    - **👍 Helpful** – Click this when the recommendation and script were useful (e.g. you followed the advice and it worked, or it matched what you’d do).
+    - **👎 Not helpful** – Click this when the recommendation didn’t fit (e.g. wrong action, script didn’t work, or the reason didn’t match this client).
+
+    **What happens when you click:**
+    - Your choice is **saved** (which client, which recommendation, and whether it was helpful or not).
+    - The **readiness bars** and **confidence %** on the screen **do not change**. They are based on this client’s data only.
+    - Over time, saved feedback is used to **improve** how Sandi suggests PUSH, NURTURE, or PAUSE for future clients.
+
+    **When to use which:**
+    - Use **Helpful** when the suggestion felt right or you used it successfully.
+    - Use **Not helpful** when the suggestion felt off or you chose a different action—so the system can learn.
+    """)
+    st.markdown("---")
+    st.subheader("🔗 5. People Like Them tab")
+    st.markdown("""
+    - Click **People Like Them** to find clients similar to one you choose.
+    - **Find people similar to…** – pick a client from the dropdown.
+    - You’ll see a **hero card** for that person and a **👁️ View full profile** button to open their Coaching Session.
+    - Below, a **grid of similar clients** (same persona/stage patterns). Each has **View profile** to open their Coaching Session.
+    - An **insight box** at the bottom suggests a pattern or tactic for that type of client.
+    """)
+    st.markdown("---")
+    st.subheader("📈 6. Insights tab")
+    st.markdown("""
+    - Click **Insights** for a high-level view of your pipeline.
+    - **Where people get stuck (by stage)** – bar chart of how many are in each stage.
+    - **Persona distribution** – pie chart of the four types (Quiet Decider, Overthinker, Burning Bridge, Strategic).
+    - **Success indicators** – average readiness by stage.
+    - **Sandi’s insights** – short bullets (e.g. Overthinkers in Exploration, Burning Bridge at Decision Prep).
+    """)
+    st.markdown("---")
+    st.subheader("🎯 Icon guide")
+    st.markdown("""
+    | Icon | Meaning |
+    |------|---------|
+    | 🧢 | Sandi Bot |
+    | 👤 | Client / person |
+    | 🎯 | PUSH – ready for decision, call today |
+    | 💡 | NURTURE – keep engaging, assign homework |
+    | 🌱 | PAUSE – step back for about 2 weeks |
+    | 📞 | Call / script |
+    | ⚠️ | Stuck or warning (e.g. >21 days in stage) |
+    | 👁️ | View full profile / open Coaching Session |
+    | 👍 | Helpful – the recommendation was useful; your feedback is saved. |
+    | 👎 | Not helpful – the recommendation didn’t fit; your feedback is saved to improve future suggestions. (Neither button changes the bars or confidence on screen.) |
+    """)
+    st.markdown("---")
+    st.caption("Need help? Start with the sidebar: enter a Customer # and Name, click Start ▶, then ask Sandi in chat.")
+
 # ---- Tab 1: Today's Coaching Dashboard ----
-if selected_tab == "Today's Dashboard":
+elif selected_tab == "Today's Dashboard":
     if df.empty:
         st.info("No clients loaded. Data will load automatically.")
     else:
@@ -263,6 +370,7 @@ elif selected_tab == "Coaching Session":
                     database.insert_feedback(p["prospect_id"], action, 0)
                     st.toast("Thanks! We'll improve.")
                 render_recommendation_card(action, reason, script=tactics[0] if tactics else None, confidence=conf, on_thumbs_up=on_up, on_thumbs_down=on_down, key_prefix="tab2_rec")
+                st.caption("👍 👎 Your feedback is saved to improve future recommendations. It does not change the readiness bars or confidence above—those are based on this client's data.")
                 st.markdown("---")
                 st.caption("Quick actions: Mark as Contacted Today · Move to Next Stage · Add Red Flag (coming soon)")
 

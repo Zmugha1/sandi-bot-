@@ -224,9 +224,10 @@ Persona drives which tactics/scripts are shown (see `sandi_bot.TACTICS_DB`).
   - **Current session:** When a session is loaded, a line displays **Customer #** and **Name** (e.g. `Current session: P001 · William Williams`). Name comes from the DB when the prospect is found, so the displayed name is always correct.  
   - Chat history (user/assistant bubbles).  
   - Chat input → `natural_sandi_bot.simple_chat_response(question, prospect, history)`; append to history and DB.
-- **Main area:**  
-  - **Tab 1 – Today's Dashboard:** Metric cards, Pipeline (by stage) or Priority stack, client cards with “View full profile” (switches to Tab 2).  
-  - **Tab 2 – Coaching Session:** Select client (by first name). Header shows **Customer #** and **Name** for the selected client (from DB). Timeline, playbook, readiness bars, script boxes, recommendation card with 👍/👎.  
+- **Main area (5 tabs):**  
+  - **Tab 0 – How to use:** In-app instructions: starting a strategy session, chat with Sandi, Today’s Dashboard, Coaching Session, People Like Them, Insights. Dedicated subsection on **👍 Helpful** and **👎 Not helpful** (what they do, when to use each; feedback is saved and does not change bars or confidence). Icon guide (🧢 👤 🎯 💡 🌱 📞 ⚠️ 👁️ 👍 👎).  
+  - **Tab 1 – Today's Dashboard:** Metric cards (🎯 Ready for Decision, 💡 Need Nurturing, ⚠️ Stuck >21 days), Pipeline (by stage) or Priority stack, client cards with “View full profile” (switches to Coaching Session tab).  
+  - **Tab 2 – Coaching Session:** Select client (by first name). Header shows **Customer #** and **Name** (from DB). Timeline, playbook (action, confidence, why, script expanders), readiness bars, recommendation card with **👍 Helpful** and **👎 Not helpful**. Caption clarifies that feedback is saved and does not change the scores on screen.  
   - **Tab 3 – People Like Them:** Hero card + similar clients grid; insight box.  
   - **Tab 4 – Insights:** Charts (where people get stuck, persona distribution, success indicators, momentum); Sandi’s insights text.
 
@@ -259,11 +260,13 @@ Persona drives which tactics/scripts are shown (see `sandi_bot.TACTICS_DB`).
 2. Sandi returns a **detailed call plan** in chat: cluster (persona) and strategy, full compartment band with current stage, readiness scores table, conversion % and red flags, recommended action with confidence and reason, next steps/scripts (from tactics DB), and compartment advancement guidance.
 3. All content is driven from algorithm outputs (cluster, compartment, scores, recommendation, tactics, advancement) so the demo shows full pipeline logic in one place.
 
-### 6.3 Person Detail and feedback
+### 6.3 Coaching Session and feedback (👍 Helpful / 👎 Not helpful)
 
-1. User opens **Person Detail**, selects a prospect.
-2. App shows scores, radar, recommendation (PUSH/NURTURE/PAUSE) and script from `sandi_bot.get_recommendation` and `get_tactics`.
-3. User clicks 👍 or 👎 → `insert_feedback(prospect_id, action, 1 or 0)`.
+1. User opens **Coaching Session** tab, selects a client (or arrives via “View full profile” from dashboard).
+2. App shows Customer # and Name, timeline, playbook (PUSH/NURTURE/PAUSE with confidence), script expanders, readiness bars.
+3. **👍 Helpful** – User clicks when the recommendation was useful. Saves feedback (prospect_id, action, rating=1). Does **not** change readiness bars or confidence on screen.
+4. **👎 Not helpful** – User clicks when the recommendation didn’t fit. Saves feedback (prospect_id, action, rating=0). Does **not** change readiness bars or confidence. Feedback is stored for future use to improve recommendations.
+5. In-app **How to use** tab documents both buttons and when to use each.
 
 ---
 
@@ -298,7 +301,7 @@ openai>=1.0.0
 
 | File / Dir        | Purpose |
 |-------------------|--------|
-| app.py            | Streamlit app: sidebar + 4 tabs; chat uses SimpleSandiBot. |
+| app.py            | Streamlit app: sidebar + 5 tabs (How to use, Today's Dashboard, Coaching Session, People Like Them, Insights); chat uses SimpleSandiBot. |
 | database.py       | SQLite and CRUD for prospects, interactions, chat_history, feedback. |
 | synthetic_data.py | Generate and load 100 prospects (4 personas, compartments). |
 | ml_models.py      | K-Means, conversion probability, similar prospects. |
@@ -350,7 +353,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Then: open sidebar → enter Customer # (e.g. P001) and Name → Start ▶ → ask in chat (e.g. “Should I push or pause?”). No OpenAI key required.
+Then: open the **How to use** tab for full instructions (sidebar, chat, each tab, 👍 Helpful / 👎 Not helpful). Or: open sidebar → enter Customer # (e.g. P001) and Name → Start ▶ → ask in chat (e.g. “Should I push or pause?”). No OpenAI key required.
 
 ---
 
