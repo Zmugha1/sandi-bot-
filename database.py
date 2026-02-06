@@ -83,6 +83,46 @@ def init_db():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS time_tracking (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prospect_id TEXT NOT NULL,
+            activity_type TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            duration_seconds REAL,
+            baseline_seconds REAL,
+            time_saved_seconds REAL,
+            created_at TEXT,
+            FOREIGN KEY (prospect_id) REFERENCES prospects(prospect_id)
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS outcomes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prospect_id TEXT NOT NULL,
+            outcome_type TEXT NOT NULL,
+            value REAL,
+            notes TEXT,
+            created_at TEXT,
+            FOREIGN KEY (prospect_id) REFERENCES prospects(prospect_id)
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS weekly_roi (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            week_start_date TEXT UNIQUE NOT NULL,
+            time_saved_hours REAL DEFAULT 0,
+            revenue_projection REAL DEFAULT 0,
+            clients_contacted INTEGER DEFAULT 0,
+            clients_advanced INTEGER DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -304,3 +344,118 @@ def get_feedback_stats(recommendation_type: Optional[str] = None) -> dict:
     total = row["total"] or 0
     positive = row["positive"] or 0
     return {"total": total, "positive": positive, "negative": total - positive}
+
+
+# --- Time tracking ---
+
+def insert_time_tracking(prospect_id: str, activity_type: str, started_at: str, ended_at: Optional[str] = None,
+                        duration_seconds: Optional[float] = None, baseline_seconds: Optional[float] = None,
+                        time_saved_seconds: Optional[float] = None) -> int:
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO time_tracking (prospect_id, activity_type, started_at, ended_at, duration_seconds,
+           baseline_seconds, time_saved_seconds, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (prospect_id, activity_type, started_at, ended_at, duration_seconds, baseline_seconds, time_saved_seconds, now)
+    )
+    row_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return row_id
+
+
+def get_time_saved_total() -> float:
+    """Total time_saved_seconds across all records (for display as hours)."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COALESCE(SUM(time_saved_seconds), 0) as total FROM time_tracking")
+    row = cur.fetchone()
+    conn.close()
+    return (row["total"] or 0) / 3600.0
+
+
+def get_time_tracking_by_week(weeks: int = 12) -> list:
+    """List of {date, time_saved_hours} by day for recent activity."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT date(started_at) as d, SUM(COALESCE(time_saved_seconds, 0)) / 3600.0 as hours
+        FROM time_tracking WHERE ended_at IS NOT NULL
+        GROUP BY date(started_at) ORDER BY d DESC LIMIT ?
+    """, (weeks * 7,))
+    rows = cur.fetchall()
+    conn.close()
+    return [{"date": row["d"], "time_saved_hours": round(row["hours"] or 0, 2)} for row in rows]
+
+
+def get_usage_dates() -> list:
+    """Distinct dates (YYYY-MM-DD) when any time_tracking activity was recorded (for consecutive-day count)."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT date(created_at) as d FROM time_tracking ORDER BY d DESC LIMIT 30")
+    rows = cur.fetchall()
+    conn.close()
+    return [row["d"] for row in rows if row["d"]]
+
+
+# --- Outcomes ---
+
+def insert_outcome(prospect_id: str, outcome_type: str, value: Optional[float] = None, notes: Optional[str] = None) -> int:
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO outcomes (prospect_id, outcome_type, value, notes, created_at) VALUES (?, ?, ?, ?, ?)",
+        (prospect_id, outcome_type, value or 0, notes, now)
+    )
+    row_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return row_id
+
+
+def get_outcomes_count(outcome_type: Optional[str] = None) -> int:
+    conn = get_connection()
+    cur = conn.cursor()
+    if outcome_type:
+        cur.execute("SELECT COUNT(*) as c FROM outcomes WHERE outcome_type = ?", (outcome_type,))
+    else:
+        cur.execute("SELECT COUNT(*) as c FROM outcomes")
+    row = cur.fetchone()
+    conn.close()
+    return row["c"] or 0
+
+
+def has_any_advancement() -> bool:
+    return get_outcomes_count("advancement") > 0
+
+
+# --- Weekly ROI ---
+
+def upsert_weekly_roi(week_start_date: str, time_saved_hours: float = 0, revenue_projection: float = 0,
+                     clients_contacted: int = 0, clients_advanced: int = 0) -> None:
+    now = datetime.utcnow().isoformat() + "Z"
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO weekly_roi (week_start_date, time_saved_hours, revenue_projection, clients_contacted, clients_advanced, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(week_start_date) DO UPDATE SET
+            time_saved_hours = excluded.time_saved_hours,
+            revenue_projection = excluded.revenue_projection,
+            clients_contacted = excluded.clients_contacted,
+            clients_advanced = excluded.clients_advanced,
+            updated_at = excluded.updated_at
+    """, (week_start_date, time_saved_hours, revenue_projection, clients_contacted, clients_advanced, now, now))
+    conn.commit()
+    conn.close()
+
+
+def get_weekly_roi(weeks: int = 12) -> list:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM weekly_roi ORDER BY week_start_date DESC LIMIT ?", (weeks,))
+    rows = cur.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

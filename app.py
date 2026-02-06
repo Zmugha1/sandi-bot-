@@ -17,6 +17,8 @@ import synthetic_data
 import ml_models
 import sandi_bot
 import natural_sandi_bot
+import roi_calculator
+from datetime import datetime, timezone
 from components import (
     render_sandi_avatar,
     render_customer_entry_form,
@@ -28,6 +30,10 @@ from components import (
     render_script_box,
     render_timeline,
     render_recommendation_card,
+    celebrate_time_saved,
+    roi_dashboard_card,
+    gentle_nudge_context,
+    render_research_button,
     first_name_only,
     action_color,
     COACHING_CSS,
@@ -74,6 +80,12 @@ if "active_tab" not in st.session_state:
     st.session_state.active_tab = 0
 if "show_priorities_only" not in st.session_state:
     st.session_state.show_priorities_only = False
+if "roi_timer_start" not in st.session_state:
+    st.session_state.roi_timer_start = None
+if "roi_timer_prospect_id" not in st.session_state:
+    st.session_state.roi_timer_prospect_id = None
+if "roi_celebration_shown_10hr" not in st.session_state:
+    st.session_state.roi_celebration_shown_10hr = False
 
 
 def load_data():
@@ -100,14 +112,59 @@ def on_start_session(prospect_id: str, name: str):
 def on_select_prospect(prospect_id: str):
     """Set selected prospect and request tab switch. Do not set main_tab here (widget key)."""
     st.session_state.selected_prospect = prospect_id
-    st.session_state.goto_tab_index = 2  # switch to Coaching Session on next run (index in tab_names)
+    st.session_state.goto_tab_index = 2  # Coaching Session
+
+def _parse_iso(s: str):
+    if not s:
+        return datetime.now(timezone.utc)
+    s = s.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
+def _record_time_and_outcome(prospect_id: str, activity_type: str, baseline_key: str):
+    """Stop ROI timer, record time_tracking and outcome, update weekly_roi, show delights."""
+    now = datetime.now(timezone.utc).isoformat()
+    start = st.session_state.get("roi_timer_start")
+    st.session_state.roi_timer_start = None
+    st.session_state.roi_timer_prospect_id = None
+    if not start:
+        return
+    start_dt = _parse_iso(start)
+    end_dt = datetime.now(timezone.utc)
+    duration_seconds = max(0, (end_dt - start_dt).total_seconds())
+    baseline_seconds = roi_calculator.BASELINE_SECONDS.get(baseline_key, roi_calculator.BASELINE_SECONDS["per_client_session"])
+    time_saved_seconds = roi_calculator.time_saved_for_session(baseline_key, duration_seconds)
+    database.insert_time_tracking(prospect_id, activity_type, start, now, duration_seconds, baseline_seconds, time_saved_seconds)
+    if activity_type == "mark_contacted":
+        database.insert_outcome(prospect_id, "contacted", 1)
+        if database.get_outcomes_count("contacted") == 1:
+            st.balloons()
+            st.success("First win! You marked your first client as contacted.")
+    week_start = roi_calculator.get_week_start(datetime.now(timezone.utc))
+    total_hr = database.get_time_saved_total()
+    contacted = database.get_outcomes_count("contacted")
+    advanced = database.get_outcomes_count("advancement")
+    rev = roi_calculator.revenue_projection(total_hr, contacted, advanced)
+    database.upsert_weekly_roi(week_start, time_saved_hours=total_hr, revenue_projection=rev, clients_contacted=contacted, clients_advanced=advanced)
+    if total_hr >= 1:
+        celebrate_time_saved(total_hr)
+    if total_hr >= 10 and not st.session_state.get("roi_celebration_shown_10hr"):
+        st.session_state.roi_celebration_shown_10hr = True
+        st.success("🍷 Go get some wine, you've earned it! You've saved **10+ hours**.")
+    usage_dates = database.get_usage_dates()
+    consecutive = roi_calculator.get_consecutive_usage_days(usage_dates)
+    if consecutive >= 5:
+        st.toast("You're building a powerful habit 💪")
 
 
 if not st.session_state.prospects:
     load_data()
 
 # Apply tab switch requested by "View full profile" (cannot set main_tab inside button callback)
-tab_names = ["How to use", "Today's Dashboard", "Coaching Session", "People Like Them", "Insights"]
+tab_names = ["How to use", "Today's Dashboard", "Coaching Session", "People Like Them", "Insights", "ROI"]
 if "goto_tab_index" in st.session_state:
     idx = st.session_state.goto_tab_index
     del st.session_state.goto_tab_index
@@ -332,6 +389,10 @@ elif selected_tab == "Coaching Session":
     if prospects and sel_id:
         p = database.get_prospect(sel_id)
         if p:
+            # Start ROI timer when opening this client card (or restart if switched client)
+            if st.session_state.roi_timer_prospect_id != sel_id or not st.session_state.roi_timer_start:
+                st.session_state.roi_timer_start = datetime.now(timezone.utc).isoformat()
+                st.session_state.roi_timer_prospect_id = sel_id
             first = first_name_only(p.get("name"))
             st.subheader(f"👤 {p.get('name', first)}")
             st.markdown(f"**Customer #:** {p.get('prospect_id', '—')} · **Name:** {p.get('name', '—')}")
@@ -372,7 +433,17 @@ elif selected_tab == "Coaching Session":
                 render_recommendation_card(action, reason, script=tactics[0] if tactics else None, confidence=conf, on_thumbs_up=on_up, on_thumbs_down=on_down, key_prefix="tab2_rec")
                 st.caption("👍 👎 Your feedback is saved to improve future recommendations. It does not change the readiness bars or confidence above—those are based on this client's data.")
                 st.markdown("---")
-                st.caption("Quick actions: Mark as Contacted Today · Move to Next Stage · Add Red Flag (coming soon)")
+                st.caption("Quick actions (these record time saved and outcomes):")
+                q1, q2 = st.columns(2)
+                with q1:
+                    if st.button("✓ Mark as Contacted", key="tab2_mark_contacted", type="primary"):
+                        _record_time_and_outcome(p["prospect_id"], "mark_contacted", "mark_contacted")
+                        st.rerun()
+                with q2:
+                    if st.button("📞 I planned my call", key="tab2_plan_call"):
+                        _record_time_and_outcome(p["prospect_id"], "plan_call", "plan_call")
+                        st.rerun()
+                st.caption("Move to Next Stage · Add Red Flag (coming soon)")
 
 # ---- Tab 3: People Like [Name] ----
 elif selected_tab == "People Like Them":
@@ -414,7 +485,7 @@ elif selected_tab == "People Like Them":
             st.info(insight)
 
 # ---- Tab 4: Coaching Insights Dashboard ----
-else:
+elif selected_tab == "Insights":
     if df.empty:
         st.info("Load clients to see insights.")
     else:
@@ -467,3 +538,48 @@ else:
         st.markdown(f"- {insight1}")
         if insight2:
             st.markdown(f"- {insight2}")
+
+# ---- Tab 5: ROI ----
+elif selected_tab == "ROI":
+    total_hr = database.get_time_saved_total()
+    contacted = database.get_outcomes_count("contacted")
+    advanced = database.get_outcomes_count("advancement")
+    rev = roi_calculator.revenue_projection(total_hr, contacted, advanced)
+    roi_dashboard_card(total_hr, rev, contacted, key_prefix="roi_tab")
+    st.markdown("---")
+    st.subheader("Weekly trends")
+    by_week = database.get_time_tracking_by_week(12)
+    if by_week:
+        # Chart: oldest first for trend left-to-right
+        ordered = list(reversed(by_week))
+        try:
+            import plotly.graph_objects as go
+            fig = go.Figure(go.Scatter(
+                x=[r["date"] for r in ordered],
+                y=[r["time_saved_hours"] for r in ordered],
+                mode="lines+markers",
+                line=dict(color=COLORS["accent"], width=2),
+                marker=dict(size=8),
+            ))
+            fig.update_layout(
+                height=320,
+                margin=dict(t=20, b=60),
+                xaxis_title="Date",
+                yaxis_title="Time saved (hours)",
+                xaxis_tickangle=-45,
+            )
+            st.plotly_chart(fig, use_container_width=True, key="roi_trend")
+        except Exception:
+            st.write("Time saved by day: ", ordered)
+    else:
+        st.caption("Complete client sessions (Mark as Contacted or Plan Call) to see your time-saved trend here.")
+    # Efficiency nudge: this week's time saved vs 10 hr target
+    week_start = roi_calculator.get_week_start(datetime.now(timezone.utc))
+    by_day = database.get_time_tracking_by_week(2)
+    this_week_hr = sum(r["time_saved_hours"] for r in by_day if r.get("date") and r["date"] >= week_start)
+    efficiency_pct = min(100.0, (this_week_hr / 10.0) * 100.0) if this_week_hr else 0
+    nudge = gentle_nudge_context(efficiency_pct)
+    if nudge:
+        st.info(nudge)
+    if total_hr >= 10:
+        render_research_button(total_hr, key="roi_research_btn")

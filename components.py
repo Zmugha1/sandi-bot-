@@ -303,5 +303,45 @@ def render_recommendation_card(
 def render_chat_message(role: str, content: str, key: str = None):
     if role == "user":
         st.markdown(f'<p class="sandi-coach sandi-body" style="text-align:right; background:#e3f2fd; padding:10px; border-radius:8px;">{content}</p>', unsafe_allow_html=True)
-    else:
-        st.markdown(f'<p class="sandi-coach sandi-body" style="background:#f5f5f5; padding:10px; border-radius:8px;">{content}</p>', unsafe_allow_html=True)
+
+
+# ---- ROI & celebration ----
+
+def celebrate_time_saved(hours: float) -> None:
+    """Show celebration toasts at 1hr, 5hr, 10hr thresholds (balloons / encouraging message)."""
+    if hours >= 10:
+        st.balloons()
+        st.success("🍷 Go get some wine, you've earned it! You've saved **10+ hours** this week.")
+    elif hours >= 5:
+        st.snow()
+        st.success("🎉 **5 hours saved** – you're on fire! Keep it up.")
+    elif hours >= 1:
+        st.success("⭐ **1 hour saved** – great start! Every minute counts.")
+
+
+def roi_dashboard_card(time_saved_hours: float, revenue_projection: float, clients_contacted: int, key_prefix: str = "roi") -> None:
+    """Three beautiful metric cards: Time saved, $ projected, Clients contacted."""
+    st.markdown(COACHING_CSS, unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("⏱️ Time saved (hrs)", f"{time_saved_hours:.1f}", help="Based on baseline vs actual time in app")
+    with c2:
+        st.metric("💰 Revenue projection ($)", f"{revenue_projection:,.0f}", help="From time reinvested and client outcomes")
+    with c3:
+        st.metric("👤 Clients contacted", str(clients_contacted), help="Marked as contacted this period")
+
+
+def gentle_nudge_context(efficiency_pct: float) -> Optional[str]:
+    """Suggest lead gen research when efficiency > 80%. Returns message or None."""
+    if efficiency_pct >= 80:
+        return "Ready for some research on how to grow your clientele? You're using your time so well – consider filling saved hours with new leads."
+    return None
+
+
+def render_research_button(hours_saved: float, key: str = "research_btn") -> bool:
+    """When Sandi has saved >10 hours, show button 'Research: How to fill these 10 hours with new clients'. Returns True if clicked."""
+    if hours_saved < 10:
+        return False
+    if st.button("📚 Research: How to fill these 10 hours with new clients", key=key, type="secondary"):
+        return True
+    return False
