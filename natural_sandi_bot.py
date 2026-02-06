@@ -1,7 +1,87 @@
 """
-Sandi Bot - Chat: SimpleSandiBot (no API key) + optional OpenAI fallback.
+Sandi Bot - Chat: SimpleSandiBot (no API key) + call planning template + optional OpenAI fallback.
 """
 from typing import Optional, List, Dict, Any
+
+# Cluster (persona) strategy one-liners for call plan
+CLUSTER_STRATEGY = {
+    "Quiet Decider": "They decide internally; don't over-pitch. One clear ask and a deadline.",
+    "Overthinker": "Reduce overwhelm with one homework item and a short follow-up call.",
+    "Burning Bridge": "They're ready to move; match their urgency with a clear next step.",
+    "Strategic": "Respect their process; provide options and a recommendation with dates.",
+}
+
+COMPARTMENTS_BAND = [
+    "Discovery", "Exploration", "Serious Consideration", "Decision Prep", "Commitment",
+]
+
+
+def _build_call_plan_template(prospect: dict) -> str:
+    """Detailed call plan using algorithm outputs: cluster, compartment band, scores, action, next steps."""
+    import sandi_bot
+    name = prospect.get("name", "this prospect")
+    pid = prospect.get("prospect_id", "")
+    persona = prospect.get("persona", "Strategic")
+    comp = prospect.get("compartment", "Discovery")
+    days = prospect.get("compartment_days", 0)
+    i = prospect.get("identity_score", 0)
+    c = prospect.get("commitment_score", 0)
+    f = prospect.get("financial_score", 0)
+    e = prospect.get("execution_score", 0)
+    conv = prospect.get("conversion_probability", 0)
+    red = prospect.get("red_flags") or []
+    strategy_line = CLUSTER_STRATEGY.get(persona, CLUSTER_STRATEGY["Strategic"])
+    action, confidence, reason = sandi_bot.get_recommendation(prospect)
+    tactics = sandi_bot.get_tactics(persona, action)
+    _, advance_reason = sandi_bot.recommend_advancement(prospect)
+    comp_index = COMPARTMENTS_BAND.index(comp) if comp in COMPARTMENTS_BAND else 0
+    band_display = " → ".join(
+        f"**{c}**" if idx == comp_index else c
+        for idx, c in enumerate(COMPARTMENTS_BAND)
+    )
+    conv_pct = int(round(conv * 100))
+    conf_pct = int(round(confidence * 100))
+    red_text = ", ".join(red) if red else "None"
+    script_lines = "\n".join(f"- {t}" for t in (tactics[:3] if tactics else ["—"]))
+
+    return f"""**📞 Call plan: {name}** (ID: {pid})
+
+---
+**Cluster (persona)**  
+**{persona}**  
+Strategy: {strategy_line}
+
+---
+**Compartment band** (where they are now)  
+{band_display}  
+• Current stage: **{comp}** (Stage {comp_index + 1} of 5)  
+• Days in this stage: **{days}**
+
+---
+**Readiness scores** (1–5)  
+| Dimension   | Score | Note |
+|-------------|-------|------|
+| Identity    | {i} | Ownership vs blame |
+| Commitment  | {c} | Ability to decide |
+| Financial   | {f} | Comfort with money |
+| Execution   | {e} | Follow-through |
+
+---
+**Conversion probability:** {conv_pct}%  
+**Red flags:** {red_text}
+
+---
+**Recommended action:** **{action}** (confidence: {conf_pct}%)  
+{reason}
+
+---
+**What to do next / scripts**  
+{script_lines}
+
+---
+**Compartment advancement**  
+{advance_reason}
+"""
 
 
 class SimpleSandiBot:
@@ -13,6 +93,11 @@ class SimpleSandiBot:
         days = prospect.get("days_in_compartment", prospect.get("compartment_days", 0))
 
         q = (question or "").lower()
+        # Call planning: detailed template with cluster, compartment band, strategy, next steps
+        if ("plan" in q and "call" in q) or ("next call" in q) or ("help me plan" in q):
+            if prospect.get("prospect_id") or prospect.get("name"):
+                return _build_call_plan_template(prospect)
+            return "Load a customer first: enter a **Customer #** and **Name** in the sidebar and click **Start ▶**. Then ask again for your call plan."
         if "push" in q:
             if days > 21:
                 return f"I'd actually PAUSE with {name}. {days} days is too long - let them breathe for 2 weeks."
