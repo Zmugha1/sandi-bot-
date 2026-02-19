@@ -17,6 +17,7 @@ from kg import build_graph as bg
 from kg import ontology as kg_ontology
 from kg import similarity as sim
 from kg import recommendations as rec
+from kg import strategy_advisor as advisor
 
 
 def _client_slug(name: str) -> str:
@@ -126,6 +127,38 @@ def render():
                 st.markdown("---")
         else:
             st.caption("No rules matched. Add rules in data/rules.yaml or add more traits/drivers/risks from the PDF.")
+
+        # Strategy Advisor (uses graph context only; never invents)
+        st.subheader("Strategy Advisor")
+        st.caption("Ask a coaching question. Answers use only this client's traits, drivers, and risks from the graph.")
+        advisor_question = st.text_input("Your question", value="", key="kg_advisor_q", placeholder="e.g. How should I approach them? What's the main risk?")
+        if st.button("Get advice", key="kg_advisor_btn") and advisor_question.strip():
+            ctx = {
+                "client_name": current_client,
+                "traits": [{"label": t.get("label"), "evidence": t.get("evidence")} for t in traits],
+                "drivers": [{"label": d.get("label"), "evidence": d.get("evidence")} for d in drivers],
+                "risks": [{"label": r.get("label"), "evidence": r.get("evidence")} for r in risks],
+            }
+            result = advisor.advise(ctx, advisor_question.strip())
+            st.session_state["kg_advisor_result"] = result
+            st.session_state["kg_advisor_question"] = advisor_question.strip()
+        if st.session_state.get("kg_advisor_result"):
+            result = st.session_state["kg_advisor_result"]
+            if st.session_state.get("kg_advisor_question"):
+                st.caption(f"Question: {st.session_state['kg_advisor_question']}")
+            st.markdown("**1. Recommendation**")
+            st.markdown(result.get("recommendation", ""))
+            st.markdown("**2. Why**")
+            st.markdown(result.get("why", "") or "—")
+            st.markdown("**3. Signals still missing**")
+            missing = result.get("signals_still_missing") or []
+            if missing:
+                for m in missing:
+                    st.markdown(f"- {m}")
+            else:
+                st.markdown("—")
+            st.markdown("**4. Suggested next step**")
+            st.markdown(result.get("suggested_next_step", ""))
 
         # Section D: Similar Clients
         st.subheader("Similar clients")
