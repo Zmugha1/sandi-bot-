@@ -18,6 +18,7 @@ from kg import ontology as kg_ontology
 from kg import similarity as sim
 from kg import recommendations as rec
 from kg import strategy_advisor as advisor
+from kg import visualize as viz
 
 
 def _client_slug(name: str) -> str:
@@ -176,27 +177,100 @@ def render():
         else:
             st.caption("No similar clients in seed set. Add entries to data/clients_seed.json.")
 
-        # Section E: Graph View
-        st.subheader("Graph view")
-        G = bg.load_graph()
-        sub = bg.get_client_subgraph(G, current_client)
-        if sub and sub.number_of_nodes() > 0:
-            try:
-                from pyvis.network import Network
-                net = Network(height="400px", width="100%", directed=True)
-                for n in sub.nodes():
-                    label = sub.nodes[n].get("label", n)
-                    net.add_node(n, label=label[:30], title=label)
-                for u, v, _ in sub.edges(keys=True):
-                    net.add_edge(u, v)
-                html = net.generate_html()
-                st.components.v1.html(html, height=420, scrolling=False)
-            except Exception:
-                _fallback_graph_view(traits, drivers, risks)
-        else:
-            _fallback_graph_view(traits, drivers, risks)
+        # Section E: Interactive Graph View
+        _render_interactive_graph_view(current_client, traits, drivers, risks)
     else:
         st.caption("Upload a PDF and enter a client name, then click Build Insights.")
+        # Still show graph section with client selector from graph
+        G = _cached_load_graph()
+        clients_in_g = viz.get_clients_in_graph(G)
+        if clients_in_g:
+            st.subheader("Interactive Graph view")
+            st.caption("Select a client that has graph data to view the graph.")
+            sel = st.selectbox("Client", clients_in_g, key="kg_graph_client_empty")
+            if sel:
+                _render_interactive_graph_view(sel, [], [], [])
+
+
+@st.cache_data(ttl=120)
+def _cached_load_graph():
+    return bg.load_graph()
+
+
+@st.cache_data(ttl=120)
+def _cached_agraph_elements(client_name: str, focus: str, depth: int, show_documents: bool):
+    G = bg.load_graph()
+    return viz.build_agraph_elements(G, client_name, focus, depth, viz.DEFAULT_NODE_LIMIT, show_documents)
+
+
+def _render_interactive_graph_view(current_client: str, traits, drivers, risks):
+    st.subheader("Interactive Graph view")
+    G = _cached_load_graph()
+    clients_in_g = viz.get_clients_in_graph(G)
+    client_options = [current_client] if current_client and current_client not in clients_in_g else []
+    client_options = list(dict.fromkeys([current_client] + clients_in_g)) if current_client else clients_in_g
+    if not client_options:
+        client_options = clients_in_g or ["(no clients in graph)"]
+    sel_client = st.selectbox("Client", client_options, key="kg_graph_client")
+    focus = st.selectbox(
+        "Focus",
+        [viz.FOCUS_ALL, viz.FOCUS_TRAITS, viz.FOCUS_DRIVERS, viz.FOCUS_RISKS, viz.FOCUS_RECOMMENDATIONS, viz.FOCUS_DOCUMENTS],
+        key="kg_graph_focus",
+    )
+    depth = st.slider("Depth", 1, 2, 1, key="kg_graph_depth")
+    show_docs = st.checkbox("Show Documents", value=False, key="kg_show_docs")
+    nodes_out, edges_out, details_map = _cached_agraph_elements(sel_client, focus, depth, show_docs)
+
+    left, right = st.columns([2, 1])
+    with left:
+        if not nodes_out:
+            _fallback_graph_view(traits, drivers, risks)
+        else:
+            try:
+                from streamlit_agraph import agraph, Node, Edge, Config
+                agraph_nodes = [Node(id=n["id"], label=n["label"], color=n.get("color", "#757575"), size=25) for n in nodes_out]
+                agraph_edges = [Edge(source=e["source"], target=e["target"], label=e.get("label", "")) for e in edges_out]
+                config = Config(width=600, height=450, directed=True, physics=True, hierarchical=False)
+                agraph(nodes=agraph_nodes, edges=agraph_edges, config=config)
+            except Exception:
+                _fallback_graph_view(traits, drivers, risks)
+    with right:
+        st.markdown("**Selected Node Details**")
+        node_options = [(n["id"], n["label"]) for n in nodes_out]
+        if node_options:
+            choice_labels = [f"{lab} ({nid[:20]}...)" if len(nid) > 20 else f"{lab}" for nid, lab in node_options]
+            idx = st.selectbox("Select node", range(len(choice_labels)), format_func=lambda i: choice_labels[i], key="kg_node_sel")
+            nid = node_options[idx][0]
+            det = details_map.get(nid, {})
+            st.markdown(f"**Type:** {det.get('type', '—')}")
+            st.markdown(f"**Label:** {det.get('label', '—')}")
+            st.markdown("**Connections**")
+            for e in det.get("edges") or []:
+                st.caption(f"{e.get('relation', '')} → {e.get('target', '')}")
+            st.markdown("**Evidence**")
+            for ev in det.get("evidence") or []:
+                st.caption(f"p.{ev.get('page', '?')}: {ev.get('snippet', '')[:100]}...")
+            if det.get("why"):
+                st.markdown("**Why**")
+                st.caption(det.get("why"))
+        else:
+            st.caption("No nodes. Build insights for this client.")
+
+    st.markdown("**Graph Summary**")
+    summary = viz.graph_summary(G, sel_client)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.caption("Counts by type")
+        for k, v in (summary.get("counts") or {}).items():
+            st.caption(f"{k}: {v}")
+    with c2:
+        st.caption("Top traits")
+        for t in summary.get("top_traits") or []:
+            st.caption(f"- {t[:50]}")
+    with c3:
+        st.caption("Top drivers")
+        for d in summary.get("top_drivers") or []:
+            st.caption(f"- {d[:50]}")
 
 
 def _fallback_graph_view(traits, drivers, risks):
