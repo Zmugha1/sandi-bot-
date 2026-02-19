@@ -211,7 +211,7 @@ with st.sidebar:
 # ---- Main: tab selector (radio; switch via goto_tab_index from "View full profile") ----
 if "main_tab" not in st.session_state:
     st.session_state.main_tab = tab_names[0]
-selected_tab = st.radio("", tab_names, key="main_tab", horizontal=True)
+selected_tab = st.radio("Section", tab_names, key="main_tab", horizontal=True, label_visibility="collapsed")
 st.session_state.active_tab = tab_names.index(selected_tab)
 
 st.title("🧢 Sandi Bot – Coaching Command Center")

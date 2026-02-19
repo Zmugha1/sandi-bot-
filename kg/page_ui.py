@@ -29,14 +29,17 @@ def _client_slug(name: str) -> str:
 
 def _build_debug_info(client_name: str, doc_id: str, extraction: Optional[dict], G, pdf_bytes: Optional[bytes]) -> dict:
     facts = extraction.get("facts") or [] if extraction else []
-    by_type = extraction.get("facts_count_by_type") if extraction else {}
-    if not by_type:
+    by_type = (extraction.get("facts_count_by_type") or {}) if extraction else {}
+    if not by_type and facts:
         for f in facts:
+            if f is None or not isinstance(f, dict):
+                continue
             t = f.get("type") or "unknown"
             by_type[t] = by_type.get(t, 0) + 1
     node_counts = {}
     for nid in G.nodes():
-        nt = str(G.nodes[nid].get("node_type") or "unknown")
+        attrs = G.nodes[nid] if hasattr(G, "nodes") else {}
+        nt = str(attrs.get("node_type") or "unknown") if attrs is not None else "unknown"
         node_counts[nt] = node_counts.get(nt, 0) + 1
     paths = stg.get_paths_for_debug()
     return {
