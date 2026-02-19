@@ -1,15 +1,16 @@
 """
 Knowledge Graph ontology: node types and edge types.
 Deterministic; no LLM.
+Node IDs: client:<slug>, trait:<label>, driver:<label>, risk:<label>, action:<label>, doc:<doc_id>.
 """
 
-# Node type prefixes for NetworkX
-NODE_CLIENT = "Client"
-NODE_TRAIT = "Trait"
-NODE_DRIVER = "Driver"
-NODE_RISK = "Risk"
-NODE_COACHING_ACTION = "CoachingAction"
-NODE_DOCUMENT = "Document"
+# Node type prefixes for NetworkX (display / GraphML node_type attribute)
+NODE_CLIENT = "client"
+NODE_TRAIT = "trait"
+NODE_DRIVER = "driver"
+NODE_RISK = "risk"
+NODE_COACHING_ACTION = "action"
+NODE_DOCUMENT = "doc"
 
 # Edge types (relation names)
 EDGE_HAS_TRAIT = "has_trait"
@@ -29,27 +30,33 @@ DEFAULT_CONFIDENCE = 0.8
 
 
 def client_id(name: str) -> str:
-    return f"{NODE_CLIENT}:{_slug(name)}"
+    """Standardized client node id: client:<client_slug>."""
+    return f"client:{_slug(name)}"
 
 
 def trait_id(label: str) -> str:
-    return f"{NODE_TRAIT}:{_norm_label(label)}"
+    """Standardized trait node id: trait:<normalized_label>."""
+    return f"trait:{_norm_label(label)}"
 
 
 def driver_id(label: str) -> str:
-    return f"{NODE_DRIVER}:{_norm_label(label)}"
+    """Standardized driver node id: driver:<normalized_label>."""
+    return f"driver:{_norm_label(label)}"
 
 
 def risk_id(label: str) -> str:
-    return f"{NODE_RISK}:{_norm_label(label)}"
+    """Standardized risk node id: risk:<normalized_label>."""
+    return f"risk:{_norm_label(label)}"
 
 
 def action_id(label: str) -> str:
-    return f"{NODE_COACHING_ACTION}:{_norm_label(label)}"
+    """Standardized action node id: action:<normalized_label>."""
+    return f"action:{_norm_label(label)}"
 
 
 def document_id(doc_id: str) -> str:
-    return f"{NODE_DOCUMENT}:{doc_id}"
+    """Standardized document node id: doc:<doc_id>."""
+    return f"doc:{doc_id}"
 
 
 def _slug(name: str) -> str:

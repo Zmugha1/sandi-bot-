@@ -10,3 +10,5 @@ networkx>=3.0
 pyvis>=0.3.0
 pyyaml>=6.0
 streamlit-agraph>=0.0.45
+# Local SLM (in-process GGUF; no server)
+llama-cpp-python==0.2.90

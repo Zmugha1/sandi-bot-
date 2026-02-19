@@ -1,12 +1,34 @@
 """
 Build/update NetworkX MultiDiGraph from extracted facts.
 Stores provenance (doc_id, page, snippet) on edges. Idempotent per doc_id.
+Node IDs: client:<slug>, trait:<label>, driver:<label>, risk:<label>, doc:<doc_id>.
 """
 import networkx as nx
 from typing import Dict, Any, List, Optional
 
 from . import ontology as o
 from . import storage as stg
+
+
+def _normalize_node_id(nid: str) -> str:
+    """Normalize legacy GraphML node ids to standard form (e.g. Client: -> client:)."""
+    if not nid or ":" not in nid:
+        return nid
+    prefix, rest = nid.split(":", 1)
+    lower = prefix.strip().lower()
+    if lower == "client":
+        return f"client:{rest}"
+    if lower == "trait":
+        return f"trait:{rest}"
+    if lower == "driver":
+        return f"driver:{rest}"
+    if lower == "risk":
+        return f"risk:{rest}"
+    if lower in ("coachingaction", "action"):
+        return f"action:{rest}"
+    if lower == "document" or lower == "doc":
+        return f"doc:{rest}"
+    return nid
 
 
 def _add_fact_to_graph(G: nx.MultiDiGraph, client_name: str, doc_id: str, fact: Dict[str, Any], confidence: float = o.DEFAULT_CONFIDENCE) -> None:
@@ -47,10 +69,66 @@ def load_graph() -> nx.MultiDiGraph:
     path = stg.get_graph_path()
     if path.exists():
         try:
-            return nx.read_graphml(path, create_using=nx.MultiDiGraph())
+            G = nx.read_graphml(path, create_using=nx.MultiDiGraph())
+            # Normalize legacy node ids so lookups by client_id() etc. match
+            if G.number_of_nodes() > 0:
+                mapping = {}
+                for nid in list(G.nodes()):
+                    new_id = _normalize_node_id(str(nid))
+                    if new_id != nid:
+                        mapping[nid] = new_id
+                if mapping:
+                    G = nx.relabel_nodes(G, mapping, copy=True)
+                for nid in G.nodes():
+                    nt = G.nodes[nid].get("node_type")
+                    if isinstance(nt, str):
+                        lower = nt.strip().lower()
+                        if lower in ("client", "trait", "driver", "risk", "document", "doc", "coachingaction", "action"):
+                            G.nodes[nid]["node_type"] = "client" if lower == "client" else "trait" if lower == "trait" else "driver" if lower == "driver" else "risk" if lower == "risk" else "doc" if lower in ("document", "doc") else "action"
+            if G.number_of_nodes() == 0 and stg.FACTS_JSONL.exists():
+                G = rebuild_graph_from_facts()
+            return G
         except Exception:
             pass
-    return nx.MultiDiGraph()
+    G = nx.MultiDiGraph()
+    if stg.FACTS_JSONL.exists():
+        return rebuild_graph_from_facts()
+    return G
+
+
+def rebuild_graph_from_facts() -> nx.MultiDiGraph:
+    """Build graph from all facts in facts.jsonl. Use when graph is empty but facts exist."""
+    G = nx.MultiDiGraph()
+    if not stg.FACTS_JSONL.exists():
+        return G
+    import json
+    # Group facts by (client_name, doc_id)
+    groups = {}
+    with open(stg.FACTS_JSONL, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            client_name = (obj.get("client_display_name") or obj.get("client_name") or "").strip()
+            if not client_name:
+                continue
+            doc_id = obj.get("doc_id") or ""
+            key = (client_name, doc_id)
+            if key not in groups:
+                groups[key] = {"client_name": client_name, "doc_id": doc_id, "facts": []}
+            groups[key]["facts"].append(obj)
+    for (_, _), payload in groups.items():
+        extraction = {
+            "client_name": payload["client_name"],
+            "doc_id": payload["doc_id"],
+            "facts": payload["facts"],
+        }
+        G = merge_facts_into_graph(G, extraction)
+    return G
 
 
 def save_graph(G: nx.MultiDiGraph) -> None:
@@ -61,6 +139,10 @@ def save_graph(G: nx.MultiDiGraph) -> None:
 def merge_facts_into_graph(G: nx.MultiDiGraph, extraction: Dict[str, Any], confidence: float = o.DEFAULT_CONFIDENCE) -> nx.MultiDiGraph:
     client_name = extraction.get("client_name") or ""
     doc_id = extraction.get("doc_id") or ""
+    cid = o.client_id(client_name)
+    did = o.document_id(doc_id)
+    G.add_node(cid, node_type=o.NODE_CLIENT, label=client_name)
+    G.add_node(did, node_type=o.NODE_DOCUMENT, label=doc_id)
     for fact in extraction.get("facts") or []:
         _add_fact_to_graph(G, client_name, doc_id, fact, confidence=confidence)
     return G

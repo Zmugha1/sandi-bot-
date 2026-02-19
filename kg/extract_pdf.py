@@ -1,9 +1,11 @@
 """
 Deterministic extraction of personality insights from PDF.
-Uses PyMuPDF (fitz) or pdfplumber. No LLM. Output: structured facts with evidence (page, snippet).
+Uses PyMuPDF first; fallback to pdfplumber if low char count. No LLM.
+Output: structured facts with evidence (page, snippet) and debug counters.
 """
 import re
-from typing import List, Dict, Any, Optional
+import io
+from typing import List, Dict, Any, Optional, Tuple
 
 try:
     import fitz  # PyMuPDF
@@ -17,11 +19,15 @@ try:
 except ImportError:
     HAS_PDFPLUMBER = False
 
-# Section headings to look for (case-insensitive)
+MIN_CHARS_OK = 1500  # Below this, try fallback or report text_extraction_failed
+
+# Section headings (TTI / Talent Insights style, case-insensitive)
 SECTION_HEADINGS = [
     "behavioral", "driving forces", "communication", "strengths",
     "areas for improvement", "checklist", "motivators", "preferences",
     "do's and don'ts", "do and don't", "key traits", "risks",
+    "tti", "talent insights", "disc", "behavioral traits", "work style",
+    "communication style", "motivators and preferences",
 ]
 
 # Keyword patterns that suggest trait/driver/risk phrases
@@ -45,12 +51,6 @@ RISK_PATTERNS = [
     r"watch (?:out|for)\s+([^.\n]+)",
     r"tendency to\s+([^.\n]+)",
 ]
-DO_DONOT_PATTERNS = [
-    r"do\s*:\s*([^\n]+)",
-    r"don'?t\s*:\s*([^\n]+)",
-    r"^\s*[-*]\s+(do|don't)\s+([^\n]+)",
-    r"^\s*[-*]\s+([^.\n]+)",  # bullet
-]
 
 
 def _extract_text_by_page_pymupdf(pdf_bytes: bytes) -> List[Dict[str, Any]]:
@@ -60,13 +60,12 @@ def _extract_text_by_page_pymupdf(pdf_bytes: bytes) -> List[Dict[str, Any]]:
         page_num = i + 1
         block = doc.load_page(i)
         text = block.get_text()
-        pages.append({"page": page_num, "text": text})
+        pages.append({"page": page_num, "text": text or ""})
     doc.close()
     return pages
 
 
 def _extract_text_by_page_pdfplumber(pdf_bytes: bytes) -> List[Dict[str, Any]]:
-    import io
     pages = []
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for i, p in enumerate(pdf.pages):
@@ -83,11 +82,16 @@ def extract_text_by_page(pdf_bytes: bytes) -> List[Dict[str, Any]]:
     raise RuntimeError("Install pymupdf or pdfplumber for PDF extraction.")
 
 
+def _count_headings(full_text: str) -> int:
+    lower = full_text.lower()
+    return sum(1 for h in SECTION_HEADINGS if h in lower)
+
+
 def _find_phrase_matches(text: str, patterns: List[str]) -> List[str]:
     found = []
     for pat in patterns:
         for m in re.finditer(pat, text, re.IGNORECASE):
-            phrase = (m.group(1) or m.group(2) if m.lastindex >= 2 else m.group(1)).strip()
+            phrase = (m.group(1) or (m.group(2) if m.lastindex >= 2 else "")).strip()
             if len(phrase) > 3 and len(phrase) < 150 and phrase not in found:
                 found.append(phrase)
     return found
@@ -99,7 +103,6 @@ def _extract_bullets(text: str, max_len: int = 120) -> List[str]:
         line = line.strip()
         if not line or len(line) < 4:
             continue
-        # bullet or numbered
         if re.match(r"^[-*•]\s+", line) or re.match(r"^\d+[.)]\s+", line):
             content = re.sub(r"^[-*•]\s+", "", re.sub(r"^\d+[.)]\s+", "", line))
             if 4 <= len(content) <= max_len and content not in bullets:
@@ -111,43 +114,38 @@ def _snippet(text: str, max_chars: int = 200) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) <= max_chars:
         return text
-    return text[: max_chars - 3].rsplit(" ", 1)[0] + "..."
+    return text[: max_chars - 3].rsplit(" ", 1)[0] + "..." if max_chars > 3 else text[:max_chars]
 
 
-def extract_facts(client_name: str, doc_id: str, pdf_bytes: bytes) -> Dict[str, Any]:
-    """
-    Deterministic extraction. Returns:
-    {
-      "client_name": ...,
-      "doc_id": ...,
-      "facts": [ {"type": "trait"|"driver"|"risk"|"communication_do"|"communication_dont"|"risk", "label": ..., "evidence": {"page": N, "snippet": ...}}, ... ]
-    }
-    """
-    pages = extract_text_by_page(pdf_bytes)
-    full_text = "\n\n".join(p["text"] for p in pages)
+def _extract_facts_from_pages(
+    pages: List[Dict[str, Any]],
+    client_name: str,
+    doc_id: str,
+) -> Tuple[List[Dict[str, Any]], int, int]:
+    """Run pattern + bullet extraction. Returns (facts, headings_found, bullets_found)."""
+    full_text = "\n\n".join(p.get("text", "") for p in pages)
+    headings_found = _count_headings(full_text)
+    bullets_found = 0
     facts = []
 
     for page_blob in pages:
         page_num = page_blob["page"]
-        text = page_blob["text"]
+        text = page_blob["text"] or ""
         if not text.strip():
             continue
 
-        # Traits
         for phrase in _find_phrase_matches(text, TRAIT_PATTERNS):
             facts.append({
                 "type": "trait",
                 "label": phrase,
                 "evidence": {"page": page_num, "snippet": _snippet(phrase + " " + text[:100])},
             })
-        # Drivers
         for phrase in _find_phrase_matches(text, DRIVER_PATTERNS):
             facts.append({
                 "type": "driver",
                 "label": phrase,
                 "evidence": {"page": page_num, "snippet": _snippet(phrase + " " + text[:100])},
             })
-        # Risks / avoid
         for phrase in _find_phrase_matches(text, RISK_PATTERNS):
             facts.append({
                 "type": "risk",
@@ -155,10 +153,10 @@ def extract_facts(client_name: str, doc_id: str, pdf_bytes: bytes) -> Dict[str, 
                 "evidence": {"page": page_num, "snippet": _snippet(phrase + " " + text[:100])},
             })
 
-        # Bullets under a "communication" or "do/don't" context
         lower = text.lower()
         if "communication" in lower or "do" in lower or "don't" in lower:
             for bullet in _extract_bullets(text):
+                bullets_found += 1
                 if any(w in bullet.lower() for w in ["avoid", "don't", "do not"]):
                     facts.append({
                         "type": "communication_dont",
@@ -171,19 +169,92 @@ def extract_facts(client_name: str, doc_id: str, pdf_bytes: bytes) -> Dict[str, 
                         "label": bullet,
                         "evidence": {"page": page_num, "snippet": _snippet(bullet)},
                     })
+        else:
+            for bullet in _extract_bullets(text):
+                bullets_found += 1
 
-    # If no pattern-based facts, use first few bullets as generic traits
     if not facts and pages:
         for page_blob in pages[:5]:
             for bullet in _extract_bullets(page_blob["text"])[:10]:
+                bullets_found += 1
                 facts.append({
                     "type": "trait",
                     "label": bullet,
                     "evidence": {"page": page_blob["page"], "snippet": _snippet(bullet)},
                 })
+    return facts[:80], headings_found, bullets_found
+
+
+def extract_facts(client_name: str, doc_id: str, pdf_bytes: bytes) -> Dict[str, Any]:
+    """
+    Deterministic extraction. Tries PyMuPDF first; if total_chars < MIN_CHARS_OK, tries pdfplumber.
+    If still low, returns extraction_status="text_extraction_failed", facts=[], and a clear message.
+    Returns:
+      client_name, doc_id, facts[],
+      total_chars_extracted, pages_with_text_count, extraction_status (ok | fallback_used | text_extraction_failed),
+      headings_found, bullets_found, facts_count_by_type
+    """
+    status = "ok"
+    pages = []
+    if HAS_FITZ:
+        pages = _extract_text_by_page_pymupdf(pdf_bytes)
+    elif HAS_PDFPLUMBER:
+        pages = _extract_text_by_page_pdfplumber(pdf_bytes)
+    else:
+        return {
+            "client_name": client_name,
+            "doc_id": doc_id,
+            "facts": [],
+            "total_chars_extracted": 0,
+            "pages_with_text_count": 0,
+            "extraction_status": "text_extraction_failed",
+            "headings_found": 0,
+            "bullets_found": 0,
+            "facts_count_by_type": {},
+            "extraction_message": "No PDF library available. Install pymupdf or pdfplumber.",
+        }
+
+    total_chars = sum(len(p.get("text", "")) for p in pages)
+    pages_with_text = sum(1 for p in pages if (p.get("text") or "").strip())
+
+    if total_chars < MIN_CHARS_OK and HAS_PDFPLUMBER and HAS_FITZ:
+        pages = _extract_text_by_page_pdfplumber(pdf_bytes)
+        total_chars = sum(len(p.get("text", "")) for p in pages)
+        pages_with_text = sum(1 for p in pages if (p.get("text") or "").strip())
+        status = "fallback_used"
+
+    if total_chars < MIN_CHARS_OK:
+        return {
+            "client_name": client_name,
+            "doc_id": doc_id,
+            "facts": [],
+            "total_chars_extracted": total_chars,
+            "pages_with_text_count": pages_with_text,
+            "extraction_status": "text_extraction_failed",
+            "headings_found": 0,
+            "bullets_found": 0,
+            "facts_count_by_type": {},
+            "extraction_message": (
+                "This PDF appears to be scanned images; text extraction returned near-zero. "
+                "Please upload a text-based PDF."
+            ),
+        }
+
+    facts, headings_found, bullets_found = _extract_facts_from_pages(pages, client_name, doc_id)
+    facts_count_by_type = {}
+    for f in facts:
+        t = f.get("type") or "unknown"
+        facts_count_by_type[t] = facts_count_by_type.get(t, 0) + 1
 
     return {
         "client_name": client_name,
         "doc_id": doc_id,
-        "facts": facts[:80],
+        "facts": facts,
+        "total_chars_extracted": total_chars,
+        "pages_with_text_count": pages_with_text,
+        "extraction_status": status,
+        "headings_found": headings_found,
+        "bullets_found": bullets_found,
+        "facts_count_by_type": facts_count_by_type,
+        "extraction_message": None,
     }

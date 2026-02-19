@@ -63,6 +63,7 @@ Sales coaching assistant that recommends **PUSH**, **NURTURE**, or **PAUSE** per
 - **Storage**: Facts appended to `data/kg/facts.jsonl`; graph saved to `data/kg/graph.graphml`. Re-uploading the same PDF (same hash) for the same client does not duplicate.
 - **Similar clients**: TF-IDF over traits/drivers/risks vs `data/clients_seed.json` (name, business_type, traits, drivers, risks).
 - **Recommendations**: Rule-based from `data/rules.yaml`; each recommendation shows action, why, and evidence (page + snippet).
+- **Strategy Tools (offline SLM)**: On the Knowledge Graph page, enable "Local SLM" and place a GGUF model in `models/slm/model.gguf` (see `models/slm/README.txt`). Generate follow-up email drafts, strategy summaries, or timeboxed call agendas. Fully local (no cloud or Ollama); output is grounded by the graph and shows "Facts Used."
 
 ## File overview
 
