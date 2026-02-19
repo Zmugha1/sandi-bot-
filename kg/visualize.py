@@ -150,7 +150,7 @@ def get_node_details(
             data = {}
         if not isinstance(data, dict):
             data = {}
-        rel = str(key) if key else "link"
+        rel = data.get("relation") or (str(key) if isinstance(key, str) else str(key) if key is not None else "link")
         other = v if u == nid else u
         other_label = _get_label(G, other) if G.has_node(other) else str(other)
         edges_out.append({"relation": rel, "target": other_label})

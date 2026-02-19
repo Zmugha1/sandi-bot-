@@ -7,13 +7,13 @@ import hashlib
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-# Base paths relative to repo root (sandi-bot)
+# Base paths: always absolute so they work regardless of working directory
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = REPO_ROOT / "data"
-KG_DIR = DATA_DIR / "kg"
-UPLOADS_DIR = DATA_DIR / "uploads"
-FACTS_JSONL = KG_DIR / "facts.jsonl"
-GRAPH_GRAPHML = KG_DIR / "graph.graphml"
+DATA_DIR = (REPO_ROOT / "data").resolve()
+KG_DIR = (DATA_DIR / "kg").resolve()
+UPLOADS_DIR = (DATA_DIR / "uploads").resolve()
+FACTS_JSONL = (KG_DIR / "facts.jsonl").resolve()
+GRAPH_GRAPHML = (KG_DIR / "graph.graphml").resolve()
 
 
 def ensure_dirs() -> None:
@@ -80,3 +80,20 @@ def get_graph_path() -> Path:
 def get_facts_path() -> Path:
     ensure_dirs()
     return FACTS_JSONL
+
+
+def get_paths_for_debug() -> Dict[str, Any]:
+    """Return absolute paths and existence for Debug Panel."""
+    ensure_dirs()
+    return {
+        "cwd": str(Path.cwd()),
+        "repo_root": str(REPO_ROOT),
+        "uploads_dir": str(UPLOADS_DIR),
+        "uploads_exists": UPLOADS_DIR.exists(),
+        "facts_path": str(FACTS_JSONL),
+        "facts_exists": FACTS_JSONL.exists(),
+        "facts_size": FACTS_JSONL.stat().st_size if FACTS_JSONL.exists() else 0,
+        "graph_path": str(GRAPH_GRAPHML),
+        "graph_exists": GRAPH_GRAPHML.exists(),
+        "graph_size": GRAPH_GRAPHML.stat().st_size if GRAPH_GRAPHML.exists() else 0,
+    }

@@ -4,6 +4,7 @@ Minimal UI, no icons. Deterministic by default.
 """
 import streamlit as st
 from pathlib import Path
+from typing import Optional
 
 # Ensure repo root on path
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -25,6 +26,30 @@ def _client_slug(name: str) -> str:
     return "".join(c if c.isalnum() or c in " -_" else "" for c in (name or "").strip()).replace(" ", "_").replace("-", "_")[:64] or "client"
 
 
+def _build_debug_info(client_name: str, doc_id: str, extraction: Optional[dict], G, pdf_bytes: Optional[bytes]) -> dict:
+    facts = extraction.get("facts") or [] if extraction else []
+    by_type = {}
+    for f in facts:
+        t = f.get("type") or "unknown"
+        by_type[t] = by_type.get(t, 0) + 1
+    node_counts = {}
+    for nid in G.nodes():
+        nt = str(G.nodes[nid].get("node_type") or "unknown")
+        node_counts[nt] = node_counts.get(nt, 0) + 1
+    paths = stg.get_paths_for_debug()
+    return {
+        "client_name": client_name,
+        "doc_id": doc_id,
+        "pdf_pages": len(ext.extract_text_by_page(pdf_bytes)) if pdf_bytes else 0,
+        "facts_extracted_count": len(facts),
+        "facts_by_type": by_type,
+        "graph_node_count": G.number_of_nodes(),
+        "graph_edge_count": G.number_of_edges(),
+        "graph_nodes_by_type": node_counts,
+        "paths": paths,
+    }
+
+
 def render():
     st.title("Knowledge Graph")
     st.caption("Upload a personality report PDF, then build insights. All recommendations cite evidence from the document.")
@@ -42,34 +67,74 @@ def render():
 
     extraction = None
     current_client = (client_name or "").strip()
+    debug_info = {}
+
     if build_clicked and pdf_file is not None and current_client:
         with st.spinner("Extracting insights..."):
             pdf_bytes = pdf_file.read()
             doc_id = stg.doc_id_from_bytes(pdf_bytes)
+            # 1) Save upload first (so file exists regardless of idempotency)
+            stg.ensure_dirs()
+            save_path = stg.save_upload(_client_slug(current_client), pdf_file.name, pdf_bytes)
+            # 2) Extract (for new doc) or load from graph (idempotency)
             if stg.client_has_doc_id(current_client, doc_id):
-                st.info("This report was already processed for this client. No duplicate facts added.")
+                st.info("This report was already processed for this client. No duplicate facts added. Loading from graph.")
+                G = bg.load_graph()
+                tdr = bg.get_client_traits_drivers_risks(G, current_client)
+                extraction = {"client_name": current_client, "doc_id": doc_id, "facts": []}
+                for item in tdr.get("traits") or []:
+                    extraction["facts"].append({"type": "trait", "label": item.get("label"), "evidence": item.get("evidence")})
+                for item in tdr.get("drivers") or []:
+                    extraction["facts"].append({"type": "driver", "label": item.get("label"), "evidence": item.get("evidence")})
+                for item in tdr.get("risks") or []:
+                    extraction["facts"].append({"type": "risk", "label": item.get("label"), "evidence": item.get("evidence")})
+                debug_info = _build_debug_info(current_client, doc_id, extraction, G, pdf_bytes)
             else:
                 extraction = ext.extract_facts(current_client, doc_id, pdf_bytes)
-                stg.ensure_dirs()
+                pdf_pages = len(ext.extract_text_by_page(pdf_bytes)) if extraction else 0
+                # 3) Persist facts
                 for fact in extraction.get("facts") or []:
-                    row = {
-                        "client_name": current_client,
-                        "doc_id": doc_id,
-                        "type": fact.get("type"),
-                        "label": fact.get("label"),
-                        "evidence": fact.get("evidence"),
-                    }
+                    row = {"client_name": current_client, "doc_id": doc_id, "type": fact.get("type"), "label": fact.get("label"), "evidence": fact.get("evidence")}
                     stg.append_fact(row)
+                # 4) Update graph and persist
                 G = bg.load_graph()
                 G = bg.merge_facts_into_graph(G, extraction)
                 bg.save_graph(G)
-                save_path = stg.save_upload(_client_slug(current_client), pdf_file.name, pdf_bytes)
+                _cached_load_graph.clear()
+                _cached_agraph_elements.clear()
+                debug_info = _build_debug_info(current_client, doc_id, extraction, G, pdf_bytes)
                 st.success(f"Processed {len(extraction.get('facts') or [])} insights. Saved to {save_path.name}.")
-            extraction = ext.extract_facts(current_client, doc_id, pdf_bytes)
     elif build_clicked and not current_client:
         st.warning("Please enter a client name.")
     elif build_clicked and pdf_file is None:
         st.warning("Please upload a PDF.")
+
+    # Debug Panel (show when we have a client or after build)
+    if current_client or debug_info:
+        G_debug = _cached_load_graph()
+        if not debug_info and current_client and G_debug.has_node(kg_ontology.client_id(current_client)):
+            tdr = bg.get_client_traits_drivers_risks(G_debug, current_client)
+            extraction_for_debug = {"client_name": current_client, "doc_id": "", "facts": []}
+            for item in tdr.get("traits") or []:
+                extraction_for_debug["facts"].append({"type": "trait", "label": item.get("label"), "evidence": item.get("evidence")})
+            for item in tdr.get("drivers") or []:
+                extraction_for_debug["facts"].append({"type": "driver", "label": item.get("label"), "evidence": item.get("evidence")})
+            for item in tdr.get("risks") or []:
+                extraction_for_debug["facts"].append({"type": "risk", "label": item.get("label"), "evidence": item.get("evidence")})
+            debug_info = _build_debug_info(current_client, "", extraction_for_debug, G_debug, None)
+        if debug_info:
+            with st.expander("Debug Panel"):
+                st.write("**Client:**", debug_info.get("client_name", "—"))
+                st.write("**doc_id:**", debug_info.get("doc_id", "—"))
+                st.write("**PDF pages:**", debug_info.get("pdf_pages", "—"))
+                st.write("**Facts extracted:**", debug_info.get("facts_extracted_count", 0), "by type:", debug_info.get("facts_by_type", {}))
+                st.write("**Graph nodes:**", debug_info.get("graph_node_count", 0), "| **edges:**", debug_info.get("graph_edge_count", 0))
+                st.write("**Nodes by type:**", debug_info.get("graph_nodes_by_type", {}))
+                p = debug_info.get("paths") or {}
+                st.write("**Paths:** cwd:", p.get("cwd", "—"))
+                st.write("- uploads_dir:", p.get("uploads_dir", "—"), "exists:", p.get("uploads_exists"))
+                st.write("- facts_path:", p.get("facts_path", "—"), "exists:", p.get("facts_exists"), "size:", p.get("facts_size", 0))
+                st.write("- graph_path:", p.get("graph_path", "—"), "exists:", p.get("graph_exists"), "size:", p.get("graph_size", 0))
 
     # Strategy Advisor chat – always visible so users see the space
     st.subheader("Strategy Advisor chat")
@@ -223,7 +288,9 @@ def _render_interactive_graph_view(current_client: str, traits, drivers, risks):
 
     left, right = st.columns([2, 1])
     with left:
-        if not nodes_out:
+        no_data = not nodes_out or (len(nodes_out) == 1 and nodes_out[0].get("id") == "no_client")
+        if no_data:
+            st.info("Build insights for this client first. Upload a PDF, enter the client name above, and click **Build Insights**.")
             _fallback_graph_view(traits, drivers, risks)
         else:
             try:
@@ -254,7 +321,7 @@ def _render_interactive_graph_view(current_client: str, traits, drivers, risks):
                 st.markdown("**Why**")
                 st.caption(det.get("why"))
         else:
-            st.caption("No nodes. Build insights for this client.")
+            st.caption("Build insights for this client first (upload PDF + client name, then Build Insights).")
 
     st.markdown("**Graph Summary**")
     summary = viz.graph_summary(G, sel_client)
@@ -274,12 +341,13 @@ def _render_interactive_graph_view(current_client: str, traits, drivers, risks):
 
 
 def _fallback_graph_view(traits, drivers, risks):
-    st.markdown("**Key traits**")
-    for t in traits[:10]:
-        st.markdown(f"- {t.get('label', '')}")
-    st.markdown("**Key drivers**")
-    for d in drivers[:10]:
-        st.markdown(f"- {d.get('label', '')}")
-    st.markdown("**Key risks**")
-    for r in risks[:10]:
-        st.markdown(f"- {r.get('label', '')}")
+    if traits or drivers or risks:
+        st.markdown("**Key traits**")
+        for t in (traits or [])[:10]:
+            st.markdown(f"- {t.get('label', '')}")
+        st.markdown("**Key drivers**")
+        for d in (drivers or [])[:10]:
+            st.markdown(f"- {d.get('label', '')}")
+        st.markdown("**Key risks**")
+        for r in (risks or [])[:10]:
+            st.markdown(f"- {r.get('label', '')}")
