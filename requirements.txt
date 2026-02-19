@@ -4,3 +4,8 @@ numpy>=1.24.0
 scikit-learn>=1.3.0
 plotly>=5.18.0
 openai>=1.0.0
+# Knowledge Graph (deterministic PDF + graph)
+pymupdf>=1.23.0
+networkx>=3.0
+pyvis>=0.3.0
+pyyaml>=6.0

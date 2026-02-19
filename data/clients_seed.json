@@ -1,0 +1,7 @@
+[
+  {"client_id": "c001", "name": "Alex Rivera", "business_type": "IT Services", "traits": ["Analytical", "Prefers data-driven decisions"], "drivers": ["Autonomy", "Recognition"], "risks": ["Overthinks under pressure"]},
+  {"client_id": "c002", "name": "Jordan Lee", "business_type": "Healthcare Consulting", "traits": ["Relationship-focused", "Strong communicator"], "drivers": ["Impact", "Helping others"], "risks": ["Avoids conflict"]},
+  {"client_id": "c003", "name": "Sam Chen", "business_type": "Financial Advisory", "traits": ["Detail-oriented", "Risk-aware"], "drivers": ["Security", "Family"], "risks": ["Avoids quick decisions"]},
+  {"client_id": "c004", "name": "Morgan Taylor", "business_type": "Marketing Agency", "traits": ["Creative", "Prefers flexibility"], "drivers": ["Autonomy", "Variety"], "risks": ["Tends to overcommit"]},
+  {"client_id": "c005", "name": "Casey Williams", "business_type": "Legal Services", "traits": ["Structured", "Prefers clear options"], "drivers": ["Certainty", "Control"], "risks": ["Analysis paralysis"]}
+]

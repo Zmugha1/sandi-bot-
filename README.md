@@ -56,17 +56,28 @@ Sales coaching assistant that recommends **PUSH**, **NURTURE**, or **PAUSE** per
 4. Add the same dependencies (Streamlit will use `requirements.txt` in the repo root).
 5. Deploy. The app will create `sandi_bot.db` in the container (data is ephemeral unless you add a persistent volume).
 
+## Knowledge Graph tab
+
+- **Upload**: PDF personality report + client name (required) + optional business type.
+- **Extraction**: Deterministic (PyMuPDF); no LLM. Looks for headings (Behavioral, Driving Forces, Communication, etc.) and patterns like "tends to", "motivated by", "avoids".
+- **Storage**: Facts appended to `data/kg/facts.jsonl`; graph saved to `data/kg/graph.graphml`. Re-uploading the same PDF (same hash) for the same client does not duplicate.
+- **Similar clients**: TF-IDF over traits/drivers/risks vs `data/clients_seed.json` (name, business_type, traits, drivers, risks).
+- **Recommendations**: Rule-based from `data/rules.yaml`; each recommendation shows action, why, and evidence (page + snippet).
+
 ## File overview
 
 | File | Purpose |
 |------|--------|
 | `app.py` | Streamlit UI: tabs + sidebar Sandi chat |
-| `database.py` | SQLite: prospects, interactions, chat_history, feedback |
+| `database.py` | SQLite: prospects, interactions, chat_history, feedback, ROI tables |
+| `kg/` | Knowledge Graph: ontology, extract_pdf, build_graph, similarity, recommendations, storage, page_ui |
+| `data/clients_seed.json` | Seed clients for "similar clients" (name, business_type, traits, drivers, risks) |
+| `data/rules.yaml` | Rule-based coaching rules (triggers + action + why) |
 | `synthetic_data.py` | Generates 100 prospects (4 personas, compartments, scores) |
 | `ml_models.py` | K-Means clustering, conversion probability, similar prospects |
-| `sandi_bot.py` | Chat engine: intents, response text, scripts, tactics DB |
-| `components.py` | UI: Sandi avatar, customer form, score bars, radar, recommendation cards |
-| `requirements.txt` | Dependencies |
+| `sandi_bot.py` | Tactics DB, recommendation logic |
+| `components.py` | UI: avatar, forms, score bars, recommendation cards, ROI components |
+| `requirements.txt` | Dependencies (includes pymupdf, networkx, pyvis, pyyaml for KG) |
 | `README.md` | This file |
 
 ## Design (senior-friendly)

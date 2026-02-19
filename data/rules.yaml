@@ -1,0 +1,75 @@
+# Rule-based coaching recommendations. Each rule has:
+#   triggers: list of conditions (trait, driver, or risk) - substring match, case-insensitive
+#   action: recommendation text
+#   why: short explanation for the coach
+
+rules:
+  - triggers:
+      trait: ["overthink", "overthinks", "analysis paralysis", "paralysis"]
+      driver: []
+      risk: ["analysis paralysis", "overthink"]
+    action: "Limit options to 2 and set a decision deadline."
+    why: "Reduces overwhelm and prompts a clear choice."
+
+  - triggers:
+      trait: []
+      driver: []
+      risk: ["avoids money", "avoid money", "financial discussion", "money talk"]
+    action: "Introduce a calm money conversation early; confirm comfort level."
+    why: "Surfaces hesitations before they block progress."
+
+  - triggers:
+      trait: []
+      driver: ["autonomy", "independence", "control"]
+      risk: []
+    action: "Frame ownership as control over time and decisions."
+    why: "Aligns with their need for self-direction."
+
+  - triggers:
+      trait: ["relationship", "people-focused", "communicator"]
+      driver: ["impact", "helping", "recognition"]
+      risk: []
+    action: "Emphasize how the outcome helps others or builds connection."
+    why: "Motivates through purpose and recognition."
+
+  - triggers:
+      trait: []
+      driver: []
+      risk: ["avoid conflict", "avoids conflict", "confrontation"]
+    action: "Use low-pressure framing; offer choices rather than direct asks."
+    why: "Reduces perceived conflict while moving forward."
+
+  - triggers:
+      trait: ["detail", "analytical", "data-driven"]
+      driver: []
+      risk: []
+    action: "Provide one-page summary or 3 bullet points before the call."
+    why: "Feeds their need to process information."
+
+  - triggers:
+      trait: []
+      driver: ["security", "certainty", "stability"]
+      risk: []
+    action: "Highlight guarantees, timelines, and what stays the same."
+    why: "Addresses need for predictability."
+
+  - triggers:
+      trait: ["creative", "flexibility"]
+      driver: ["variety", "autonomy"]
+      risk: ["overcommit"]
+    action: "Propose one clear next step and one optional follow-up."
+    why: "Keeps focus without feeling boxed in."
+
+  - triggers:
+      trait: []
+      driver: []
+      risk: ["quick decision", "rushed", "deadline pressure"]
+    action: "Give 24–48 hours to reflect; then one short check-in."
+    why: "Balances momentum with their pace."
+
+  - triggers:
+      trait: ["structured", "clear options"]
+      driver: ["control", "certainty"]
+      risk: []
+    action: "Present a simple A vs B choice with pros and cons."
+    why: "Matches their preference for structure and control."
