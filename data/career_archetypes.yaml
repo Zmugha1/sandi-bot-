@@ -1,0 +1,110 @@
+# Career archetypes for fit scoring. requires = signal_tag -> weight (positive); avoid = signal_tag -> penalty.
+# recommended_actions = bullets for the coach.
+
+archetypes:
+  - name: Sales / Business Development
+    description: Roles focused on persuasion, relationships, and closing.
+    requires:
+      "Persuasive / influence": 1.5
+      "People-oriented": 1.2
+      "Competitive / challenge-driven": 1.0
+    avoid:
+      "Avoid strict adherence to standards": 0.8
+      "Detail-oriented": 0.3
+    recommended_actions:
+      - "Emphasize commission and upside; tie to clear targets."
+      - "Use role-play or script practice if they like structure."
+    industry_examples: ["B2B sales", "Account executive", "Partnerships"]
+
+  - name: Consulting / Advisory
+    description: Strategic, client-facing roles with variety and impact.
+    requires:
+      "Big-picture thinker": 1.2
+      "People-oriented": 1.0
+      "Needs clear decisions (yes/no closure)": 0.8
+    avoid:
+      "Avoid strict diplomacy environments": 0.5
+    recommended_actions:
+      - "Frame as solving complex problems with clear deliverables."
+      - "Highlight project-based work and client variety."
+    industry_examples: ["Management consulting", "Strategy", "Advisory"]
+
+  - name: Entrepreneurship / Founder
+    description: High autonomy, risk, and end-to-end ownership.
+    requires:
+      "Autonomy-seeking": 1.5
+      "Prefers risk-taking environments": 1.2
+      "Competitive / challenge-driven": 1.0
+    avoid:
+      "Security / stability-seeking": 1.0
+      "Avoid strict adherence to standards": 0.5
+    recommended_actions:
+      - "Discuss runway, milestones, and control over direction."
+      - "Address fear of failure with small bets and validation."
+    industry_examples: ["Startup founder", "Solopreneur", "Small business owner"]
+
+  - name: People & Culture / HR
+    description: Roles centered on talent, culture, and development.
+    requires:
+      "People-oriented": 1.5
+      "Relationship-focused": 1.2
+      "Impact / helping-driven": 1.0
+    avoid:
+      "Competitive / challenge-driven": 0.4
+    recommended_actions:
+      - "Emphasize impact on employee experience and growth."
+      - "Link to DEI, L&D, or culture initiatives."
+    industry_examples: ["HR Business Partner", "L&D", "Talent"]
+
+  - name: Marketing / Growth
+    description: Creative, data-informed roles with measurable outcomes.
+    requires:
+      "Creative / flexible": 1.0
+      "Big-picture thinker": 0.8
+      "Persuasive / influence": 0.8
+    avoid:
+      "Low tolerance for rigid rules": 0.3
+    recommended_actions:
+      - "Balance creativity with clear KPIs and experiments."
+      - "Offer ownership of channels or campaigns."
+    industry_examples: ["Growth marketing", "Brand", "Content"]
+
+  - name: Operations / Execution
+    description: Process, detail, and delivery-focused roles.
+    requires:
+      "Detail-oriented": 1.2
+      "Needs clear decisions (yes/no closure)": 1.0
+      "Security / stability-seeking": 0.6
+    avoid:
+      "Prefers risk-taking environments": 0.6
+      "Low tolerance for rigid rules": 0.8
+    recommended_actions:
+      - "Highlight clear processes, SLAs, and predictability."
+      - "Provide checklists and templates."
+    industry_examples: ["Operations", "Program management", "Delivery"]
+
+  - name: Coaching / Facilitation
+    description: Enabling others through guidance and workshops.
+    requires:
+      "People-oriented": 1.3
+      "Impact / helping-driven": 1.2
+      "Persuasive / influence": 0.7
+    avoid:
+      "Avoid strict diplomacy environments": 0.5
+    recommended_actions:
+      - "Frame as enabling teams and individuals to succeed."
+      - "Use certification or methodology as structure."
+    industry_examples: ["Executive coach", "Facilitator", "Trainer"]
+
+  - name: Product Management
+    description: Cross-functional ownership of vision and roadmap.
+    requires:
+      "Big-picture thinker": 1.2
+      "People-oriented": 0.8
+      "Needs clear decisions (yes/no closure)": 0.8
+    avoid:
+      "Avoid strict adherence to standards": 0.4
+    recommended_actions:
+      - "Emphasize discovery, prioritization, and stakeholder alignment."
+      - "Tie to user impact and metrics."
+    industry_examples: ["Product manager", "Product owner"]

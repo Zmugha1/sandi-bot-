@@ -164,7 +164,7 @@ if not st.session_state.prospects:
     load_data()
 
 # Apply tab switch requested by "View full profile" (cannot set main_tab inside button callback)
-tab_names = ["How to use", "Today's Dashboard", "Coaching Session", "People Like Them", "Insights", "ROI", "Knowledge Graph"]
+tab_names = ["How to use", "Today's Dashboard", "Coaching Session", "People Like Them", "Insights", "ROI", "Career & Business Fit"]
 if "goto_tab_index" in st.session_state:
     idx = st.session_state.goto_tab_index
     del st.session_state.goto_tab_index
@@ -584,7 +584,7 @@ elif selected_tab == "ROI":
     if total_hr >= 10:
         render_research_button(total_hr, key="roi_research_btn")
 
-# ---- Tab 6: Knowledge Graph ----
-elif selected_tab == "Knowledge Graph":
+# ---- Tab 6: Career & Business Fit (Knowledge Graph) ----
+elif selected_tab == "Career & Business Fit":
     from kg import page_ui as kg_page
     kg_page.render()

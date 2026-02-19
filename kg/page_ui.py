@@ -1,6 +1,6 @@
 """
-Knowledge Graph Streamlit page: upload PDF, extract insights, show graph and recommendations.
-Minimal UI, no icons. Deterministic by default.
+Career & Business Fit: upload PDF, build insights, show Top 5 careers, Top 5 businesses, call plan, email draft.
+Simple UI, no icons. Deterministic by default. Graph internal; optional "Show Graph" at bottom.
 """
 import streamlit as st
 from pathlib import Path
@@ -16,11 +16,11 @@ from kg import storage as stg
 from kg import extract_pdf as ext
 from kg import build_graph as bg
 from kg import ontology as kg_ontology
-from kg import similarity as sim
-from kg import recommendations as rec
-from kg import strategy_advisor as advisor
 from kg import visualize as viz
 from kg import context_pack as cp
+from kg import signals as sig
+from kg import fit_scoring as fit
+from kg import templates as tpl
 
 
 def _client_slug(name: str) -> str:
@@ -63,8 +63,8 @@ def _build_debug_info(client_name: str, doc_id: str, extraction: Optional[dict],
 
 
 def render():
-    st.title("Knowledge Graph")
-    st.caption("Upload a personality report PDF, then build insights. All recommendations cite evidence from the document.")
+    st.title("Career & Business Fit")
+    st.caption("Upload a personality report PDF and build insights. You'll see top career fits, business fits, a call plan, and optional email draft. All evidence from the document.")
 
     # Section A: Upload + Client Details
     st.subheader("Upload and client details")
@@ -167,7 +167,7 @@ def render():
                 extraction_for_debug["facts"].append({"type": "risk", "label": item.get("label"), "evidence": item.get("evidence")})
             debug_info = _build_debug_info(current_client, "", extraction_for_debug, G_debug, None)
         if debug_info:
-            with st.expander("Debug Panel"):
+            with st.expander("Debug Panel", expanded=False):
                 st.write("**Client:**", debug_info.get("client_name", "—"))
                 st.write("**client_node_id (for visualization):**", debug_info.get("client_node_id", "—"))
                 st.write("**doc_id:**", debug_info.get("doc_id", "—"))
@@ -186,44 +186,6 @@ def render():
                 st.write("- index_dir:", p.get("index_dir", "—"), "exists:", p.get("index_exists"))
                 st.write("- facts_path:", p.get("facts_path", "—"), "exists:", p.get("facts_exists"), "size:", p.get("facts_size", 0))
                 st.write("- graph_path:", p.get("graph_path", "—"), "exists:", p.get("graph_exists"), "size:", p.get("graph_size", 0))
-
-    # Strategy Advisor chat – always visible so users see the space
-    st.subheader("Strategy Advisor chat")
-    st.caption("Ask a coaching question. Answers use only this client's traits, drivers, and risks from the graph. Build insights above first (upload PDF + client name) to get advice.")
-    # Show chat history above the input
-    for msg in st.session_state.get("kg_chat_history") or []:
-        if msg.get("role") == "user":
-            with st.chat_message("user"):
-                st.write(msg.get("content", ""))
-        else:
-            with st.chat_message("assistant"):
-                r = msg.get("content") or {}
-                st.markdown("**1. Recommendation**")
-                st.write(r.get("recommendation", ""))
-                st.markdown("**2. Why**")
-                st.write(r.get("why") or "—")
-                st.markdown("**3. Signals still missing**")
-                for m in r.get("signals_still_missing") or []:
-                    st.markdown(f"- {m}")
-                if not r.get("signals_still_missing"):
-                    st.write("—")
-                st.markdown("**4. Suggested next step**")
-                st.write(r.get("suggested_next_step", ""))
-
-    advisor_question = st.chat_input("Ask the Strategy Advisor...", key="kg_advisor_chat")
-    if advisor_question and (advisor_question := advisor_question.strip()):
-        ctx = {"client_name": current_client or "Unknown", "traits": [], "drivers": [], "risks": []}
-        if current_client:
-            G = bg.load_graph()
-            if G.has_node(kg_ontology.client_id(current_client)):
-                tdr = bg.get_client_traits_drivers_risks(G, current_client)
-                ctx["traits"] = [{"label": t.get("label"), "evidence": t.get("evidence")} for t in (tdr.get("traits") or [])]
-                ctx["drivers"] = [{"label": d.get("label"), "evidence": d.get("evidence")} for d in (tdr.get("drivers") or [])]
-                ctx["risks"] = [{"label": r.get("label"), "evidence": r.get("evidence")} for r in (tdr.get("risks") or [])]
-        result = advisor.advise(ctx, advisor_question)
-        st.session_state.setdefault("kg_chat_history", []).append({"role": "user", "content": advisor_question})
-        st.session_state["kg_chat_history"].append({"role": "assistant", "content": result})
-        st.rerun()
 
     # If we have a client (from form or session), load their insights from graph or facts
     if not extraction and current_client:
@@ -251,67 +213,103 @@ def render():
             facts_for_client = stg.load_facts_for_client(current_client)
             if facts_for_client:
                 extraction = {
-                "client_name": current_client,
-                "doc_id": facts_for_client[0].get("doc_id", "") if facts_for_client else "",
-                "facts": [{"type": f.get("type"), "label": f.get("label"), "evidence": f.get("evidence")} for f in facts_for_client],
-            }
+                    "client_name": current_client,
+                    "doc_id": facts_for_client[0].get("doc_id", "") if facts_for_client else "",
+                    "facts": [{"type": f.get("type"), "label": f.get("label"), "evidence": f.get("evidence")} for f in facts_for_client],
+                }
 
     if extraction:
-        traits = [f for f in extraction.get("facts") or [] if f.get("type") == "trait"]
-        drivers = [f for f in extraction.get("facts") or [] if f.get("type") == "driver"]
-        risks = [f for f in extraction.get("facts") or [] if f.get("type") in ("risk", "communication_dont")]
-        comm_do = [f for f in extraction.get("facts") or [] if f.get("type") in ("communication_do",)]
+        facts = extraction.get("facts") or []
+        signals = sig.normalize_facts_to_signals(facts)
+        career_fit = fit.get_career_fit(signals, top_n=5)
+        business_fit = fit.get_business_fit(signals, top_n=5)
 
-        # Section B: Key Insights (with evidence)
-        st.subheader("Key insights")
+        # Career Fit Top 5
+        st.subheader("Career Fit: Top 5")
+        if career_fit:
+            for i, c in enumerate(career_fit, 1):
+                with st.container():
+                    st.markdown(f"**{i}. {c.get('name', '')}** — {c.get('description', '')}")
+                    st.caption(f"Why: {c.get('rationale', '')}")
+                    for ev in c.get("evidence_used") or []:
+                        st.caption(f"Evidence (p.{ev.get('page', '?')}): {(ev.get('snippet') or '')[:150]}...")
+                    if c.get("watch_outs"):
+                        st.caption("Watch-outs: " + "; ".join(c["watch_outs"]))
+                    if c.get("recommended_actions"):
+                        for a in c["recommended_actions"][:2]:
+                            st.caption(f"- {a}")
+                    st.markdown("---")
+        else:
+            st.caption("Not enough signals. Add more insights from the report and rebuild.")
+
+        # Business Fit Top 5
+        st.subheader("Business Fit: Top 5")
+        if business_fit:
+            for i, b in enumerate(business_fit, 1):
+                with st.container():
+                    st.markdown(f"**{i}. {b.get('name', '')}** — {b.get('description', '')}")
+                    st.caption(f"Why: {b.get('rationale', '')}")
+                    for ev in b.get("evidence_used") or []:
+                        st.caption(f"Evidence (p.{ev.get('page', '?')}): {(ev.get('snippet') or '')[:150]}...")
+                    if b.get("watch_outs"):
+                        st.caption("Watch-outs: " + "; ".join(b["watch_outs"]))
+                    if b.get("recommended_actions"):
+                        for a in b["recommended_actions"][:2]:
+                            st.caption(f"- {a}")
+                    st.markdown("---")
+        else:
+            st.caption("Not enough signals. Add more insights from the report and rebuild.")
+
+        # Call Prep (one-page plan)
+        st.subheader("Call Prep")
+        call_plan = tpl.render_call_plan(signals)
+        st.markdown(call_plan)
+
+        # Quick actions: 3 buttons
+        st.subheader("Quick actions")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.markdown("**Traits**")
-            for t in traits[:15]:
-                ev = t.get("evidence") or {}
-                st.markdown(f"- {t.get('label', '')}")
-                st.caption(f"p.{ev.get('page', '?')}: {ev.get('snippet', '')[:100]}...")
+            plan_clicked = st.button("Plan My Next Call", key="kg_plan_call")
         with col2:
-            st.markdown("**Drivers**")
-            for d in drivers[:15]:
-                ev = d.get("evidence") or {}
-                st.markdown(f"- {d.get('label', '')}")
-                st.caption(f"p.{ev.get('page', '?')}: {ev.get('snippet', '')[:100]}...")
+            summary_clicked = st.button("Summarize This Client", key="kg_summary")
         with col3:
-            st.markdown("**Risks / Watch**")
-            for r in risks[:15]:
-                ev = r.get("evidence") or {}
-                st.markdown(f"- {r.get('label', '')}")
-                st.caption(f"p.{ev.get('page', '?')}: {ev.get('snippet', '')[:100]}...")
+            email_clicked = st.button("Draft Follow-up Email", key="kg_email")
+        if plan_clicked:
+            st.session_state["kg_show_plan"] = True
+            st.session_state["kg_show_summary"] = False
+            st.session_state["kg_show_email"] = False
+        if summary_clicked:
+            st.session_state["kg_show_summary"] = True
+            st.session_state["kg_show_plan"] = False
+            st.session_state["kg_show_email"] = False
+        if email_clicked:
+            st.session_state["kg_show_email"] = True
+            st.session_state["kg_show_plan"] = False
+            st.session_state["kg_show_summary"] = False
 
-        # Section C: Recommendations (with why)
-        st.subheader("Recommendations")
-        recs = rec.get_recommendations(traits, drivers, risks, max_n=5)
-        if recs:
-            for r in recs:
-                st.markdown(f"**{r.get('action', '')}**")
-                st.markdown(f"Why: {r.get('why', '')}")
-                ev = r.get("evidence") or {}
-                st.caption(f"Evidence (p.{ev.get('page', '?')}): {ev.get('snippet', '')[:120]}...")
-                st.markdown("---")
-        else:
-            st.caption("No rules matched. Add rules in data/rules.yaml or add more traits/drivers/risks from the PDF.")
+        if st.session_state.get("kg_show_plan"):
+            st.markdown("---")
+            st.markdown(tpl.render_call_plan(signals))
+        if st.session_state.get("kg_show_summary"):
+            st.markdown("---")
+            st.markdown(tpl.render_client_summary(signals))
+        if st.session_state.get("kg_show_email"):
+            st.markdown("---")
+            outcome_optional = st.text_input("Call outcome (optional)", value="", key="kg_email_outcome", placeholder="e.g. Agreed next steps")
+            use_slm = st.checkbox("Use local SLM to polish email", value=False, key="kg_email_slm")
+            if use_slm:
+                _render_email_with_slm(current_client, signals, outcome_optional)
+            else:
+                draft = tpl.render_followup_email_template(signals, outcome_optional, current_client or "there")
+                st.text_area("Email draft", value=draft, height=220, key="kg_email_draft")
 
-        # Section D: Similar Clients
-        st.subheader("Similar clients")
-        similar = sim.get_similar_clients(traits, drivers, risks, top_n=5)
-        if similar:
-            for sclient, score, overlap in similar:
-                st.markdown(f"**{sclient.get('name', '')}** — {sclient.get('business_type', '')}")
-                st.caption(f"Similarity: {score:.2f}. Overlap: {', '.join(overlap[:5])}.")
-        else:
-            st.caption("No similar clients in seed set. Add entries to data/clients_seed.json.")
-
-        # Section D2: Strategy Tools (local SLM)
-        _render_strategy_tools(current_client, _cached_load_graph())
-
-        # Section E: Interactive Graph View
-        _render_interactive_graph_view(current_client, traits, drivers, risks)
+        # Optional: Show Graph (toggle at bottom)
+        show_graph = st.checkbox("Show Graph (advanced)", value=False, key="kg_show_graph")
+        if show_graph:
+            traits = [f for f in facts if f.get("type") == "trait"]
+            drivers = [f for f in facts if f.get("type") == "driver"]
+            risks = [f for f in facts if f.get("type") in ("risk", "communication_dont")]
+            _render_interactive_graph_view(current_client, traits, drivers, risks)
     else:
         st.caption("Upload a PDF and enter a client name, then click Build Insights.")
         # Still show graph section with client selector from graph
@@ -323,6 +321,34 @@ def render():
             sel = st.selectbox("Client", clients_in_g, key="kg_graph_client_empty")
             if sel:
                 _render_interactive_graph_view(sel, [], [], [])
+
+
+def _render_email_with_slm(current_client: str, signals: dict, outcome_text: str):
+    """Optional: use local SLM to polish follow-up email. Falls back to template if SLM off or fails."""
+    model_path_default = str(REPO_ROOT / "models" / "slm" / "model.gguf")
+    model_path = st.text_input("Model path (GGUF)", value=model_path_default, key="kg_slm_path")
+    if not Path(model_path).exists():
+        st.caption("Model file not found. Using template below.")
+        st.markdown(tpl.render_followup_email_template(signals, outcome_text, current_client or "there"))
+        return
+    G = _cached_load_graph()
+    pack = _cached_context_pack(current_client, f"{G.number_of_nodes()}_{G.number_of_edges()}")
+    if cp.count_facts_in_pack(pack) < 3:
+        st.caption("Not enough evidence in graph. Using template.")
+        st.markdown(tpl.render_followup_email_template(signals, outcome_text, current_client or "there"))
+        return
+    try:
+        from slm.prompts import system_prompt_email, user_prompt_email
+        system_prompt = system_prompt_email()
+        user_prompt = user_prompt_email(pack, call_outcome=outcome_text)
+        llm = _cached_llm(model_path)
+        llm.config.max_tokens = 250
+        out = llm.generate(system_prompt, user_prompt, max_tokens=250)
+        disclaimer = "Draft generated from stored client insights; review before sending."
+        st.text_area("Email draft", value=(out + "\n\n" + disclaimer) if out else disclaimer, height=220, key="kg_slm_email_out")
+    except Exception as e:
+        st.caption(f"SLM failed: {e}. Using template.")
+        st.markdown(tpl.render_followup_email_template(signals, outcome_text, current_client or "there"))
 
 
 @st.cache_data(ttl=120)
