@@ -21,8 +21,19 @@ from kg import context_pack as cp
 from kg import signals as sig
 from kg import fit_scoring as fit
 from kg import templates as tpl
+from kg import chat_context as chat_ctx
+from kg import chat_answer as chat_ans
 
 _MIN_SIGNALS_FOR_FIT = 1
+
+FIT_CHAT_SUGGESTED = [
+    "Which of the top 5 careers fits me best and why?",
+    "Which of the top 5 businesses fits me best and why?",
+    "What should I avoid in a role or business based on this report?",
+    "How should I explain these results to my spouse/partner?",
+    "What is a 30-day action plan to explore the top 2 options?",
+    "What questions should I ask on my next discovery call?",
+]
 
 
 def _client_slug(name: str) -> str:
@@ -55,6 +66,76 @@ def _render_fit_card(rank: int, item: dict) -> None:
         if a:
             st.caption(f"- {a}")
     st.markdown("---")
+
+
+def _render_fit_chat(
+    signals: dict,
+    career_fit: list,
+    business_fit: list,
+    client_name: str,
+    business_type: str,
+) -> None:
+    """Controlled chat at end of page: suggested questions, chat input, deterministic answers + optional SLM polish."""
+    if "fit_chat_history" not in st.session_state:
+        st.session_state["fit_chat_history"] = []
+    if "fit_chat_pending_question" not in st.session_state:
+        st.session_state["fit_chat_pending_question"] = None
+
+    st.subheader("Ask a Question (Optional)")
+    st.caption("Answers are based only on this report's extracted signals.")
+
+    context = chat_ctx.build_chat_context(signals, career_fit, business_fit, client_name, business_type)
+    use_slm = st.checkbox("Polish answer with local SLM", value=False, key="kg_chat_slm")
+
+    # Suggested questions (click = submit that question)
+    for i, q in enumerate(FIT_CHAT_SUGGESTED):
+        if st.button(q, key=f"kg_chat_sugg_{i}"):
+            st.session_state["fit_chat_pending_question"] = q
+            st.rerun()
+
+    # Process pending question (from suggested button click)
+    if st.session_state.get("fit_chat_pending_question"):
+        question = st.session_state["fit_chat_pending_question"]
+        st.session_state["fit_chat_pending_question"] = None
+        answer = chat_ans.get_deterministic_answer(question, context)
+        if use_slm:
+            try:
+                llm = _cached_llm(str(REPO_ROOT / "models" / "slm" / "model.gguf"))
+                def _gen(sys: str, user: str, max_tok: int):
+                    return llm.generate(sys, user, max_tokens=max_tok)
+                polished = chat_ans.polish_with_slm(answer, _gen)
+                if polished:
+                    answer = polished
+            except Exception:
+                pass
+        st.session_state["fit_chat_history"].append({"role": "user", "content": question})
+        st.session_state["fit_chat_history"].append({"role": "assistant", "content": answer})
+        st.rerun()
+
+    # Chat history
+    for msg in st.session_state.get("fit_chat_history", []):
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Chat input
+    prompt = st.chat_input("Type a question…")
+    if prompt:
+        prompt = (prompt or "").strip()
+        if prompt:
+            answer = chat_ans.get_deterministic_answer(prompt, context)
+            if use_slm:
+                try:
+                    llm = _cached_llm(str(REPO_ROOT / "models" / "slm" / "model.gguf"))
+                    def _gen(sys: str, user: str, max_tok: int):
+                        return llm.generate(sys, user, max_tokens=max_tok)
+                    polished = chat_ans.polish_with_slm(answer, _gen)
+                    if polished:
+                        answer = polished
+                except Exception:
+                    pass
+            st.session_state["fit_chat_history"].append({"role": "user", "content": prompt})
+            st.session_state["fit_chat_history"].append({"role": "assistant", "content": answer})
+            st.rerun()
 
 
 def _build_debug_info(client_name: str, doc_id: str, extraction: Optional[dict], G, pdf_bytes: Optional[bytes]) -> dict:
@@ -96,7 +177,15 @@ def render():
     st.title("Career & Business Fit")
     st.caption("Upload a personality report to generate top career and business fits with evidence-backed rationale.")
 
-    # Session state: no auto-load; results only after explicit Generate or Load
+    # Session state: pending upload (no processing until Generate is clicked)
+    if "kg_pending_pdf_bytes" not in st.session_state:
+        st.session_state["kg_pending_pdf_bytes"] = None
+    if "kg_pending_filename" not in st.session_state:
+        st.session_state["kg_pending_filename"] = None
+    if "kg_pending_client_name" not in st.session_state:
+        st.session_state["kg_pending_client_name"] = ""
+    if "kg_pending_business_type" not in st.session_state:
+        st.session_state["kg_pending_business_type"] = ""
     if "kg_has_results" not in st.session_state:
         st.session_state["kg_has_results"] = False
     if "kg_active_client_slug" not in st.session_state:
@@ -122,6 +211,10 @@ def render():
             st.session_state["kg_extraction"] = None
             st.session_state["kg_debug_info"] = {}
             st.session_state["kg_result_client_name"] = None
+            st.session_state["kg_pending_pdf_bytes"] = None
+            st.session_state["kg_pending_filename"] = None
+            st.session_state["fit_chat_history"] = []
+            st.session_state["fit_chat_pending_question"] = None
             st.rerun()
 
     # Tabs: New Report | Load Existing
@@ -136,7 +229,34 @@ def render():
         pdf_file = st.file_uploader("Personality Report (PDF)", type=["pdf"], key="kg_pdf")
         client_name_new = st.text_input("Client Name", value="", key="kg_client_name", placeholder="Required")
         current_client = (client_name_new or "").strip()
-        # Clear results if user changed client name (demo-safe: no stale report)
+
+        # On file upload: ONLY store bytes; do NOT process (demo-critical)
+        if pdf_file is not None:
+            try:
+                pdf_bytes_from_upload = pdf_file.getvalue()
+                if pdf_bytes_from_upload:
+                    if pdf_bytes_from_upload != st.session_state.get("kg_pending_pdf_bytes"):
+                        st.session_state["kg_pending_pdf_bytes"] = pdf_bytes_from_upload
+                        st.session_state["kg_pending_filename"] = pdf_file.name or "report.pdf"
+                        st.session_state["kg_has_results"] = False
+                        st.session_state["kg_active_client_slug"] = None
+                        st.session_state["kg_active_doc_id"] = None
+                        st.session_state["kg_last_action"] = None
+                        st.session_state["kg_extraction"] = None
+                        st.session_state["kg_debug_info"] = {}
+                        st.session_state["kg_result_client_name"] = None
+                else:
+                    st.session_state["kg_pending_pdf_bytes"] = None
+                    st.session_state["kg_pending_filename"] = None
+            except Exception:
+                pass
+        else:
+            # User cleared the file upload; clear pending only (do not clear Load Existing results)
+            if st.session_state.get("kg_pending_pdf_bytes") is not None:
+                st.session_state["kg_pending_pdf_bytes"] = None
+                st.session_state["kg_pending_filename"] = None
+
+        # Clear results if user changed client name (demo-safe)
         if st.session_state.get("kg_has_results") and st.session_state.get("kg_result_client_name"):
             if current_client != st.session_state.get("kg_result_client_name"):
                 st.session_state["kg_has_results"] = False
@@ -146,6 +266,7 @@ def render():
                 st.session_state["kg_extraction"] = None
                 st.session_state["kg_debug_info"] = {}
                 st.session_state["kg_result_client_name"] = None
+
         business_type = st.selectbox(
             "Business Type (optional)",
             ["", "IT Services", "Healthcare Consulting", "Financial Advisory", "Marketing Agency", "Legal Services", "Other"],
@@ -153,77 +274,52 @@ def render():
         )
         build_clicked = st.button("Generate Fit Report", type="primary", key="kg_build")
 
-        if build_clicked and pdf_file is not None and current_client:
-            with st.spinner("Extracting insights..."):
-                pdf_bytes = pdf_file.read()
-                doc_id = stg.doc_id_from_bytes(pdf_bytes)
-                client_slug = _client_slug(current_client)
-                stg.ensure_dirs()
-                save_path = stg.save_upload(client_slug, pdf_file.name, pdf_bytes)
+        # Processing ONLY when Generate is clicked; use pending bytes, never auto-process on upload
+        if build_clicked:
+            pdf_bytes = st.session_state.get("kg_pending_pdf_bytes")
+            pending_filename = st.session_state.get("kg_pending_filename") or "report.pdf"
+            if not pdf_bytes:
+                st.warning("Please upload a PDF first. Uploading a file does not generate a report until you click Generate Fit Report.")
+            elif not current_client:
+                st.warning("Please enter a client name.")
+            else:
+                with st.spinner("Extracting insights..."):
+                    doc_id = stg.doc_id_from_bytes(pdf_bytes)
+                    client_slug = _client_slug(current_client)
+                    stg.ensure_dirs()
+                    save_path = stg.save_upload(client_slug, pending_filename, pdf_bytes)
 
-                already_processed = stg.client_has_doc_id(current_client, doc_id)
-                if not already_processed:
-                    legacy_facts = stg.load_facts_for_client(current_client, doc_id=doc_id)
-                    if legacy_facts:
-                        already_processed = True
-                        stg.register_processed_doc(client_slug, current_client, doc_id, str(save_path), len(legacy_facts), graph_updated=True)
-                if already_processed:
-                    st.info("This report was already processed for this client. No duplicate facts added. Loading from graph.")
-                    G = bg.load_graph()
-                    if G.number_of_nodes() == 0 and stg.FACTS_JSONL.exists():
-                        G = bg.rebuild_graph_from_facts()
-                        bg.save_graph(G)
-                        _cached_load_graph.clear()
-                        _cached_agraph_elements.clear()
+                    already_processed = stg.client_has_doc_id(current_client, doc_id)
+                    if not already_processed:
+                        legacy_facts = stg.load_facts_for_client(current_client, doc_id=doc_id)
+                        if legacy_facts:
+                            already_processed = True
+                            stg.register_processed_doc(client_slug, current_client, doc_id, str(save_path), len(legacy_facts), graph_updated=True)
+                    if already_processed:
+                        st.info("This report was already processed for this client. Loading from graph.")
                         G = bg.load_graph()
-                    facts_from_file = stg.load_facts_for_client(current_client, doc_id=doc_id)
-                    if facts_from_file:
-                        extraction = {
-                            "client_name": current_client,
-                            "doc_id": doc_id,
-                            "facts": [{"type": f.get("type"), "label": f.get("label"), "evidence": f.get("evidence")} for f in facts_from_file],
-                        }
-                    else:
-                        tdr = bg.get_client_traits_drivers_risks(G, current_client)
-                        extraction = {"client_name": current_client, "doc_id": doc_id, "facts": []}
-                        for item in tdr.get("traits") or []:
-                            extraction["facts"].append({"type": "trait", "label": item.get("label"), "evidence": item.get("evidence")})
-                        for item in tdr.get("drivers") or []:
-                            extraction["facts"].append({"type": "driver", "label": item.get("label"), "evidence": item.get("evidence")})
-                        for item in tdr.get("risks") or []:
-                            extraction["facts"].append({"type": "risk", "label": item.get("label"), "evidence": item.get("evidence")})
-                    debug_info = _build_debug_info(current_client, doc_id, extraction, G, pdf_bytes)
-                    st.session_state["kg_has_results"] = True
-                    st.session_state["kg_active_client_slug"] = client_slug
-                    st.session_state["kg_active_doc_id"] = doc_id
-                    st.session_state["kg_last_action"] = "generate"
-                    st.session_state["kg_extraction"] = extraction
-                    st.session_state["kg_debug_info"] = debug_info
-                    st.session_state["kg_result_client_name"] = current_client
-                else:
-                    extraction = ext.extract_facts(current_client, doc_id, pdf_bytes)
-                    if extraction.get("extraction_status") == "text_extraction_failed":
-                        st.error(extraction.get("extraction_message") or "Text extraction failed. Please upload a text-based PDF.")
-                        debug_info = _build_debug_info(current_client, doc_id, extraction, bg.load_graph(), pdf_bytes)
-                    else:
-                        num_facts = len(extraction.get("facts") or [])
-                        for fact in extraction.get("facts") or []:
-                            row = {
-                                "client_slug": client_slug,
-                                "client_display_name": current_client,
+                        if G.number_of_nodes() == 0 and stg.FACTS_JSONL.exists():
+                            G = bg.rebuild_graph_from_facts()
+                            bg.save_graph(G)
+                            _cached_load_graph.clear()
+                            _cached_agraph_elements.clear()
+                            G = bg.load_graph()
+                        facts_from_file = stg.load_facts_for_client(current_client, doc_id=doc_id)
+                        if facts_from_file:
+                            extraction = {
                                 "client_name": current_client,
                                 "doc_id": doc_id,
-                                "type": fact.get("type"),
-                                "label": fact.get("label"),
-                                "evidence": fact.get("evidence"),
+                                "facts": [{"type": f.get("type"), "label": f.get("label"), "evidence": f.get("evidence")} for f in facts_from_file],
                             }
-                            stg.append_fact(row)
-                        G = bg.load_graph()
-                        G = bg.merge_facts_into_graph(G, extraction)
-                        bg.save_graph(G)
-                        stg.register_processed_doc(client_slug, current_client, doc_id, str(save_path), num_facts, graph_updated=True)
-                        _cached_load_graph.clear()
-                        _cached_agraph_elements.clear()
+                        else:
+                            tdr = bg.get_client_traits_drivers_risks(G, current_client)
+                            extraction = {"client_name": current_client, "doc_id": doc_id, "facts": []}
+                            for item in tdr.get("traits") or []:
+                                extraction["facts"].append({"type": "trait", "label": item.get("label"), "evidence": item.get("evidence")})
+                            for item in tdr.get("drivers") or []:
+                                extraction["facts"].append({"type": "driver", "label": item.get("label"), "evidence": item.get("evidence")})
+                            for item in tdr.get("risks") or []:
+                                extraction["facts"].append({"type": "risk", "label": item.get("label"), "evidence": item.get("evidence")})
                         debug_info = _build_debug_info(current_client, doc_id, extraction, G, pdf_bytes)
                         st.session_state["kg_has_results"] = True
                         st.session_state["kg_active_client_slug"] = client_slug
@@ -232,11 +328,39 @@ def render():
                         st.session_state["kg_extraction"] = extraction
                         st.session_state["kg_debug_info"] = debug_info
                         st.session_state["kg_result_client_name"] = current_client
-                        st.success("Report generated.")
-        elif build_clicked and not current_client:
-            st.warning("Please enter a client name.")
-        elif build_clicked and pdf_file is None:
-            st.warning("Please upload a PDF.")
+                    else:
+                        extraction = ext.extract_facts(current_client, doc_id, pdf_bytes)
+                        if extraction.get("extraction_status") == "text_extraction_failed":
+                            st.error(extraction.get("extraction_message") or "Text extraction failed. Please upload a text-based PDF.")
+                            debug_info = _build_debug_info(current_client, doc_id, extraction, bg.load_graph(), pdf_bytes)
+                        else:
+                            num_facts = len(extraction.get("facts") or [])
+                            for fact in extraction.get("facts") or []:
+                                row = {
+                                    "client_slug": client_slug,
+                                    "client_display_name": current_client,
+                                    "client_name": current_client,
+                                    "doc_id": doc_id,
+                                    "type": fact.get("type"),
+                                    "label": fact.get("label"),
+                                    "evidence": fact.get("evidence"),
+                                }
+                                stg.append_fact(row)
+                            G = bg.load_graph()
+                            G = bg.merge_facts_into_graph(G, extraction)
+                            bg.save_graph(G)
+                            stg.register_processed_doc(client_slug, current_client, doc_id, str(save_path), num_facts, graph_updated=True)
+                            _cached_load_graph.clear()
+                            _cached_agraph_elements.clear()
+                            debug_info = _build_debug_info(current_client, doc_id, extraction, G, pdf_bytes)
+                            st.session_state["kg_has_results"] = True
+                            st.session_state["kg_active_client_slug"] = client_slug
+                            st.session_state["kg_active_doc_id"] = doc_id
+                            st.session_state["kg_last_action"] = "generate"
+                            st.session_state["kg_extraction"] = extraction
+                            st.session_state["kg_debug_info"] = debug_info
+                            st.session_state["kg_result_client_name"] = current_client
+                            st.success("Report generated.")
 
     with tab_load:
         st.subheader("Load Existing")
@@ -380,8 +504,17 @@ def render():
             elif drafting == "Strategy summary":
                 if num_signals >= _MIN_SIGNALS_FOR_FIT:
                     st.markdown(tpl.render_client_summary(signals))
+
+            # 5) Ask a Question (Optional) — controlled chat at end of page
+            _render_fit_chat(
+                signals,
+                career_fit,
+                business_fit,
+                current_client,
+                st.session_state.get("kg_business_type", ""),
+            )
     else:
-        st.caption("Upload a PDF and enter a client name, then click **Generate Fit Report**, or use **Load Existing** to open a prior client.")
+        st.caption("Upload a PDF, enter client name, then click **Generate Fit Report**. Or use **Load Existing** to open a prior client.")
 
 
 def _render_email_with_slm(current_client: str, signals: dict, outcome_text: str):
