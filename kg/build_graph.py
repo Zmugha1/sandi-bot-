@@ -45,7 +45,7 @@ def _add_fact_to_graph(G: nx.MultiDiGraph, client_name: str, doc_id: str, fact: 
     label = (fact.get("label") or "").strip()[:200] or "unknown"
 
     # Store relation on edge so GraphML round-trip preserves type (keys can become 0,1,2...)
-    if fact_type == "trait":
+    if fact_type in ("trait", "strengths_do", "communication_do", "trait_do"):
         nid = o.trait_id(label)
         G.add_node(nid, node_type=o.NODE_TRAIT, label=label)
         G.add_edge(cid, nid, key=o.EDGE_HAS_TRAIT, relation=o.EDGE_HAS_TRAIT, doc_id=doc_id, page=page, snippet=snippet, confidence=confidence)
@@ -53,14 +53,10 @@ def _add_fact_to_graph(G: nx.MultiDiGraph, client_name: str, doc_id: str, fact: 
         nid = o.driver_id(label)
         G.add_node(nid, node_type=o.NODE_DRIVER, label=label)
         G.add_edge(cid, nid, key=o.EDGE_HAS_DRIVER, relation=o.EDGE_HAS_DRIVER, doc_id=doc_id, page=page, snippet=snippet, confidence=confidence)
-    elif fact_type in ("risk", "communication_dont"):
+    elif fact_type in ("risk", "communication_dont", "risks_dont", "trait_dont"):
         nid = o.risk_id(label)
         G.add_node(nid, node_type=o.NODE_RISK, label=label)
         G.add_edge(cid, nid, key=o.EDGE_HAS_RISK, relation=o.EDGE_HAS_RISK, doc_id=doc_id, page=page, snippet=snippet, confidence=confidence)
-    elif fact_type in ("communication_do",):
-        nid = o.trait_id("Do: " + label)
-        G.add_node(nid, node_type=o.NODE_TRAIT, label="Do: " + label)
-        G.add_edge(cid, nid, key=o.EDGE_HAS_TRAIT, relation=o.EDGE_HAS_TRAIT, doc_id=doc_id, page=page, snippet=snippet, confidence=confidence)
 
     G.add_edge(cid, did, key=o.EDGE_EVIDENCE_FROM, relation=o.EDGE_EVIDENCE_FROM, doc_id=doc_id, page=page, snippet=snippet, confidence=confidence)
 

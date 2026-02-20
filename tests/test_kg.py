@@ -28,8 +28,30 @@ def test_extract_facts_deterministic():
     assert out["client_name"] == "Test Client"
     assert out["doc_id"] == "doc123"
     assert "facts" in out
-    # May be empty if patterns don't match; at least structure is correct
     assert isinstance(out["facts"], list)
+    assert "do_lines_found_count" in out
+    assert "dont_lines_found_count" in out
+
+
+def test_extract_do_dont_and_debug_counts():
+    """Do/Don't extraction and debug counts; no junk fragments."""
+    fake_pdf = _make_pdf_with_do_dont()
+    if fake_pdf is None:
+        return
+    out = ext.extract_facts("Zubia Mughal", "ttsi_doc", fake_pdf)
+    assert "do_lines_found_count" in out
+    assert "dont_lines_found_count" in out
+    assert "facts_count_by_type" in out
+    # Should have trait_do / trait_dont if Do: and Don't: lines present
+    by_type = out["facts_count_by_type"]
+    assert by_type.get("trait_do", 0) + by_type.get("trait_dont", 0) >= 1, "expected at least one Do or Don't fact"
+    # No junk fragment labels
+    for f in out["facts"]:
+        label = (f.get("label") or "")
+        assert "mask some of" not in label.lower(), "no junk fragment in label"
+        assert "working as" not in label.lower() or len(label) >= 80, "no short 'working as' fragment"
+    print("  do_lines_found_count:", out["do_lines_found_count"], "dont_lines_found_count:", out["dont_lines_found_count"])
+    print("  facts_count_by_type:", out["facts_count_by_type"])
 
 
 def test_graph_merge_and_idempotency():
@@ -75,10 +97,42 @@ def _make_minimal_pdf():
         return None
 
 
+def _make_pdf_with_do_dont():
+    """PDF with TTI-style Do: and Don't: lines; enough text to pass MIN_CHARS_OK so extraction runs."""
+    try:
+        import fitz
+        import tempfile
+        import os
+        doc = fitz.open()
+        page = doc.new_page()
+        # TTI-style section
+        text = (
+            "Checklist for Communicating\n"
+            "Do: People-oriented.\n"
+            "Do: Big thinker.\n"
+            "Don't: Leave decisions hanging in the air.\n"
+            "Do: Provide 'yes' or 'no' answers—not maybe.\n"
+        )
+        # Filler so total_chars >= 1500 (MIN_CHARS_OK)
+        filler = "Behavioral report. " * 80
+        page.insert_text((50, 50), text + "\n\n" + filler)
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+            doc.write(f.name)
+            doc.close()
+            with open(f.name, "rb") as r:
+                buf = r.read()
+            os.unlink(f.name)
+        return buf
+    except Exception:
+        return None
+
+
 if __name__ == "__main__":
     test_doc_id()
     print("doc_id OK")
     test_extract_facts_deterministic()
     print("extract_facts OK")
+    test_extract_do_dont_and_debug_counts()
+    print("Do/Don't extraction and debug counts OK")
     test_graph_merge_and_idempotency()
     print("graph merge OK")

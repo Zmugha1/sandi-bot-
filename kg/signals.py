@@ -1,8 +1,10 @@
 """
 Signal normalization: map extracted facts (traits/drivers/risks) to stable signal tags.
-Deterministic, no LLM. Used for Career & Business Fit scoring.
+Deterministic, no LLM. Evidence is cleaned and limited to 2 high-quality snippets per signal.
 """
 from typing import Dict, List, Any
+
+from . import clean_text as ct
 
 # Stable signal tags (canonical set)
 SIGNAL_TAGS = [
@@ -113,6 +115,16 @@ PHRASE_TO_SIGNALS: List[tuple] = [
     ("helping", "Impact / helping-driven"),
     ("impact-driven", "Impact / helping-driven"),
     ("purpose", "Impact / helping-driven"),
+    # TTI Driving Forces (clean labels -> signals)
+    ("intellectual", "Big-picture thinker"),
+    ("receptive", "People-oriented"),
+    ("aesthetic", "Creative / flexible"),
+    ("economic", "Competitive / challenge-driven"),
+    ("individualistic", "Autonomy-seeking"),
+    ("altruistic", "Impact / helping-driven"),
+    ("regulatory", "Security / stability-seeking"),
+    ("theoretical", "Big-picture thinker"),
+    ("utilitarian", "Detail-oriented"),
 ]
 
 
@@ -130,11 +142,15 @@ def _match_signals(label: str, fact_type: str) -> List[str]:
     return out
 
 
+MAX_EVIDENCE_PER_SIGNAL = 2
+
+
 def normalize_facts_to_signals(facts: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """
     Map extracted facts to stable signal tags.
     Returns: { signal_tag: { "score": float, "evidence": [ {"page": N, "snippet": "..."}, ... ] } }
-    Score = number of facts contributing to this signal (1.0 per fact); evidence capped at 5 per signal.
+    Score = number of facts contributing to this signal (1.0 per fact).
+    Evidence: only acceptable snippets (clean_text); max 2 per signal for demo-ready display.
     """
     result: Dict[str, Dict[str, Any]] = {}
     for fact in facts or []:
@@ -148,8 +164,11 @@ def normalize_facts_to_signals(facts: List[Dict[str, Any]]) -> Dict[str, Dict[st
             snippet = ev_list[0].get("snippet", "") if ev_list else ""
         else:
             page = evidence.get("page")
-            snippet = (evidence.get("snippet") or "")[:240]
-        ev_entry = {"page": page, "snippet": (snippet[:240] if snippet else "")}
+            snippet = (evidence.get("snippet") or "").strip()
+        cleaned = ct.prepare_evidence_for_display(snippet, max_len=200)
+        if cleaned is None and snippet and ct.is_acceptable_evidence(ct.clean_evidence_snippet(snippet, max_len=200)):
+            cleaned = ct.clean_evidence_snippet(snippet, max_len=200)
+        ev_entry = {"page": page, "snippet": cleaned} if cleaned else None
         tags = _match_signals(label, fact.get("type") or "")
         if not tags:
             tags = ["Relationship-focused"]
@@ -157,6 +176,6 @@ def normalize_facts_to_signals(facts: List[Dict[str, Any]]) -> Dict[str, Dict[st
             if tag not in result:
                 result[tag] = {"score": 0.0, "evidence": []}
             result[tag]["score"] = result[tag]["score"] + 1.0
-            if len(result[tag]["evidence"]) < 5:
+            if ev_entry and len(result[tag]["evidence"]) < MAX_EVIDENCE_PER_SIGNAL:
                 result[tag]["evidence"].append(ev_entry)
     return result

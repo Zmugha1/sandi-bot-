@@ -1,6 +1,6 @@
 """
-Career & Business Fit: upload PDF, build insights, show Top 5 careers, Top 5 businesses, call plan, email draft.
-Simple UI, no icons. Deterministic by default. Graph internal; optional "Show Graph" at bottom.
+Career & Business Fit Report: upload PDF, generate top career and business fits with evidence-backed rationale.
+Primary output: Career Fit Top 5, Business Fit Top 5. Supporting Insights and Advanced (graph/debug) collapsed.
 """
 import streamlit as st
 from pathlib import Path
@@ -22,9 +22,39 @@ from kg import signals as sig
 from kg import fit_scoring as fit
 from kg import templates as tpl
 
+_MIN_SIGNALS_FOR_FIT = 1
+
 
 def _client_slug(name: str) -> str:
     return "".join(c if c.isalnum() or c in " -_" else "" for c in (name or "").strip()).replace(" ", "_").replace("-", "_")[:64] or "client"
+
+
+def _render_fit_card(rank: int, item: dict) -> None:
+    """Render one Career or Business Fit card: rank, name, description, Why, Evidence, Watch-outs, Recommended (max 2)."""
+    name = item.get("name") or ""
+    desc = (item.get("description") or "").strip()
+    st.markdown(f"**{rank}. {name}** — {desc}")
+    rationale = item.get("rationale") or ""
+    if rationale:
+        st.caption(f"Why: {rationale}")
+    evidence_list = item.get("evidence_used") or []
+    if evidence_list:
+        st.caption("Evidence:")
+        for ev in evidence_list[:2]:
+            page = ev.get("page", "?")
+            snippet = (ev.get("snippet") or "").strip()
+            if snippet:
+                st.caption(f'  (p.{page}) "{snippet}"')
+    watch_outs = item.get("watch_outs") or []
+    if watch_outs:
+        st.caption("Watch-outs:")
+        for w in watch_outs[:2]:
+            st.caption(f"  - {w}")
+    actions = item.get("recommended_actions") or []
+    for a in actions[:2]:
+        if a:
+            st.caption(f"- {a}")
+    st.markdown("---")
 
 
 def _build_debug_info(client_name: str, doc_id: str, extraction: Optional[dict], G, pdf_bytes: Optional[bytes]) -> dict:
@@ -64,10 +94,10 @@ def _build_debug_info(client_name: str, doc_id: str, extraction: Optional[dict],
 
 def render():
     st.title("Career & Business Fit")
-    st.caption("Upload a personality report PDF and build insights. You'll see top career fits, business fits, a call plan, and optional email draft. All evidence from the document.")
+    st.caption("Upload a personality report to generate top career and business fits with evidence-backed rationale.")
 
-    # Section A: Upload + Client Details
-    st.subheader("Upload and client details")
+    # Workflow: Upload + Client + optional Business Type
+    st.subheader("Workflow")
     pdf_file = st.file_uploader("Personality Report (PDF)", type=["pdf"], key="kg_pdf")
     client_name = st.text_input("Client Name", value="", key="kg_client_name", placeholder="Required")
     business_type = st.selectbox(
@@ -75,7 +105,7 @@ def render():
         ["", "IT Services", "Healthcare Consulting", "Financial Advisory", "Marketing Agency", "Legal Services", "Other"],
         key="kg_business_type",
     )
-    build_clicked = st.button("Build Insights", type="primary", key="kg_build")
+    build_clicked = st.button("Generate Fit Report", type="primary", key="kg_build")
 
     extraction = None
     current_client = (client_name or "").strip()
@@ -147,45 +177,11 @@ def render():
                     _cached_load_graph.clear()
                     _cached_agraph_elements.clear()
                     debug_info = _build_debug_info(current_client, doc_id, extraction, G, pdf_bytes)
-                    st.success(f"Processed {num_facts} insights. Saved to {save_path.name}.")
+                    st.success("Report generated.")
     elif build_clicked and not current_client:
         st.warning("Please enter a client name.")
     elif build_clicked and pdf_file is None:
         st.warning("Please upload a PDF.")
-
-    # Debug Panel (show when we have a client or after build)
-    if current_client or debug_info:
-        G_debug = _cached_load_graph()
-        if not debug_info and current_client and G_debug.has_node(kg_ontology.client_id(current_client)):
-            tdr = bg.get_client_traits_drivers_risks(G_debug, current_client)
-            extraction_for_debug = {"client_name": current_client, "doc_id": "", "facts": []}
-            for item in tdr.get("traits") or []:
-                extraction_for_debug["facts"].append({"type": "trait", "label": item.get("label"), "evidence": item.get("evidence")})
-            for item in tdr.get("drivers") or []:
-                extraction_for_debug["facts"].append({"type": "driver", "label": item.get("label"), "evidence": item.get("evidence")})
-            for item in tdr.get("risks") or []:
-                extraction_for_debug["facts"].append({"type": "risk", "label": item.get("label"), "evidence": item.get("evidence")})
-            debug_info = _build_debug_info(current_client, "", extraction_for_debug, G_debug, None)
-        if debug_info:
-            with st.expander("Debug Panel", expanded=False):
-                st.write("**Client:**", debug_info.get("client_name", "—"))
-                st.write("**client_node_id (for visualization):**", debug_info.get("client_node_id", "—"))
-                st.write("**doc_id:**", debug_info.get("doc_id", "—"))
-                st.write("**PDF pages:**", debug_info.get("pdf_pages", "—"))
-                st.write("**total_chars_extracted:**", debug_info.get("total_chars_extracted", "—"))
-                st.write("**pages_with_text_count:**", debug_info.get("pages_with_text_count", "—"))
-                st.write("**extraction_status:**", debug_info.get("extraction_status", "—"))
-                st.write("**headings_found:**", debug_info.get("headings_found", "—"))
-                st.write("**bullets_found:**", debug_info.get("bullets_found", "—"))
-                st.write("**Facts extracted:**", debug_info.get("facts_extracted_count", 0), "| **facts_count_by_type:**", debug_info.get("facts_count_by_type", debug_info.get("facts_by_type", {})))
-                st.write("**Graph nodes:**", debug_info.get("graph_node_count", 0), "| **edges:**", debug_info.get("graph_edge_count", 0))
-                st.write("**Nodes by type:**", debug_info.get("graph_nodes_by_type", {}))
-                p = debug_info.get("paths") or {}
-                st.write("**Paths:** cwd:", p.get("cwd", "—"))
-                st.write("- uploads_dir:", p.get("uploads_dir", "—"), "exists:", p.get("uploads_exists"))
-                st.write("- index_dir:", p.get("index_dir", "—"), "exists:", p.get("index_exists"))
-                st.write("- facts_path:", p.get("facts_path", "—"), "exists:", p.get("facts_exists"), "size:", p.get("facts_size", 0))
-                st.write("- graph_path:", p.get("graph_path", "—"), "exists:", p.get("graph_exists"), "size:", p.get("graph_size", 0))
 
     # If we have a client (from form or session), load their insights from graph or facts
     if not extraction and current_client:
@@ -219,108 +215,93 @@ def render():
                 }
 
     if extraction:
+        if not debug_info and current_client:
+            G = _cached_load_graph()
+            debug_info = _build_debug_info(current_client, extraction.get("doc_id") or "", extraction, G, None)
         facts = extraction.get("facts") or []
         signals = sig.normalize_facts_to_signals(facts)
-        career_fit = fit.get_career_fit(signals, top_n=5)
-        business_fit = fit.get_business_fit(signals, top_n=5)
+        num_signals = len(signals)
+        num_pages = extraction.get("pages_with_text_count") or 0
 
-        # Career Fit Top 5
-        st.subheader("Career Fit: Top 5")
-        if career_fit:
-            for i, c in enumerate(career_fit, 1):
-                with st.container():
-                    st.markdown(f"**{i}. {c.get('name', '')}** — {c.get('description', '')}")
-                    st.caption(f"Why: {c.get('rationale', '')}")
-                    for ev in c.get("evidence_used") or []:
-                        st.caption(f"Evidence (p.{ev.get('page', '?')}): {(ev.get('snippet') or '')[:150]}...")
-                    if c.get("watch_outs"):
-                        st.caption("Watch-outs: " + "; ".join(c["watch_outs"]))
-                    if c.get("recommended_actions"):
-                        for a in c["recommended_actions"][:2]:
-                            st.caption(f"- {a}")
-                    st.markdown("---")
+        # Extraction Quality (short line, no long debug)
+        st.caption(f"Extraction Quality: Extracted {num_signals} signals from {num_pages} pages.")
+
+        if num_signals < _MIN_SIGNALS_FOR_FIT:
+            st.info(
+                "We couldn't extract enough clean signals from this PDF. "
+                "Try exporting a text-based PDF or a different report version."
+            )
         else:
-            st.caption("Not enough signals. Add more insights from the report and rebuild.")
+            career_fit = fit.get_career_fit(signals, top_n=5)
+            business_fit = fit.get_business_fit(signals, top_n=5)
 
-        # Business Fit Top 5
-        st.subheader("Business Fit: Top 5")
-        if business_fit:
-            for i, b in enumerate(business_fit, 1):
-                with st.container():
-                    st.markdown(f"**{i}. {b.get('name', '')}** — {b.get('description', '')}")
-                    st.caption(f"Why: {b.get('rationale', '')}")
-                    for ev in b.get("evidence_used") or []:
-                        st.caption(f"Evidence (p.{ev.get('page', '?')}): {(ev.get('snippet') or '')[:150]}...")
-                    if b.get("watch_outs"):
-                        st.caption("Watch-outs: " + "; ".join(b["watch_outs"]))
-                    if b.get("recommended_actions"):
-                        for a in b["recommended_actions"][:2]:
-                            st.caption(f"- {a}")
-                    st.markdown("---")
-        else:
-            st.caption("Not enough signals. Add more insights from the report and rebuild.")
-
-        # Call Prep (one-page plan)
-        st.subheader("Call Prep")
-        call_plan = tpl.render_call_plan(signals)
-        st.markdown(call_plan)
-
-        # Quick actions: 3 buttons
-        st.subheader("Quick actions")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            plan_clicked = st.button("Plan My Next Call", key="kg_plan_call")
-        with col2:
-            summary_clicked = st.button("Summarize This Client", key="kg_summary")
-        with col3:
-            email_clicked = st.button("Draft Follow-up Email", key="kg_email")
-        if plan_clicked:
-            st.session_state["kg_show_plan"] = True
-            st.session_state["kg_show_summary"] = False
-            st.session_state["kg_show_email"] = False
-        if summary_clicked:
-            st.session_state["kg_show_summary"] = True
-            st.session_state["kg_show_plan"] = False
-            st.session_state["kg_show_email"] = False
-        if email_clicked:
-            st.session_state["kg_show_email"] = True
-            st.session_state["kg_show_plan"] = False
-            st.session_state["kg_show_summary"] = False
-
-        if st.session_state.get("kg_show_plan"):
-            st.markdown("---")
-            st.markdown(tpl.render_call_plan(signals))
-        if st.session_state.get("kg_show_summary"):
-            st.markdown("---")
-            st.markdown(tpl.render_client_summary(signals))
-        if st.session_state.get("kg_show_email"):
-            st.markdown("---")
-            outcome_optional = st.text_input("Call outcome (optional)", value="", key="kg_email_outcome", placeholder="e.g. Agreed next steps")
-            use_slm = st.checkbox("Use local SLM to polish email", value=False, key="kg_email_slm")
-            if use_slm:
-                _render_email_with_slm(current_client, signals, outcome_optional)
+            # 1) Career Fit: Top 5
+            st.subheader("Career Fit: Top 5")
+            if career_fit:
+                for i, c in enumerate(career_fit, 1):
+                    _render_fit_card(i, c)
             else:
-                draft = tpl.render_followup_email_template(signals, outcome_optional, current_client or "there")
-                st.text_area("Email draft", value=draft, height=220, key="kg_email_draft")
+                st.caption("No career fits matched. Add more insights from the report and regenerate.")
 
-        # Optional: Show Graph (toggle at bottom)
-        show_graph = st.checkbox("Show Graph (advanced)", value=False, key="kg_show_graph")
-        if show_graph:
-            traits = [f for f in facts if f.get("type") == "trait"]
-            drivers = [f for f in facts if f.get("type") == "driver"]
-            risks = [f for f in facts if f.get("type") in ("risk", "communication_dont")]
-            _render_interactive_graph_view(current_client, traits, drivers, risks)
+            # 2) Business Fit: Top 5
+            st.subheader("Business Fit: Top 5")
+            if business_fit:
+                for i, b in enumerate(business_fit, 1):
+                    _render_fit_card(i, b)
+            else:
+                st.caption("No business fits matched. Add more insights from the report and regenerate.")
+
+        # 3) Supporting Insights (collapsed by default)
+        with st.expander("Supporting Insights", expanded=False):
+            if num_signals >= _MIN_SIGNALS_FOR_FIT and signals:
+                for tag, data in sorted(signals.items(), key=lambda x: -float(x[1].get("score", 0))):
+                    score = data.get("score", 0)
+                    st.caption(f"**{tag}** (score {score})")
+
+        # 4) Advanced: graph + debug + Drafting Tools (collapsed by default)
+        with st.expander("Advanced", expanded=False):
+            if debug_info:
+                st.markdown("**Debug Panel**")
+                st.write("Client:", debug_info.get("client_name", "—"), "| doc_id:", debug_info.get("doc_id", "—"))
+                st.write("Facts:", debug_info.get("facts_extracted_count", 0), "| by type:", debug_info.get("facts_count_by_type", {}))
+                st.write("Graph nodes:", debug_info.get("graph_node_count", 0), "| edges:", debug_info.get("graph_edge_count", 0))
+            show_graph = st.checkbox("Show Graph", value=False, key="kg_show_graph")
+            if show_graph:
+                traits = [f for f in facts if f.get("type") == "trait"]
+                drivers = [f for f in facts if f.get("type") == "driver"]
+                risks = [f for f in facts if f.get("type") in ("risk", "communication_dont", "trait_dont")]
+                _render_interactive_graph_view(current_client, traits, drivers, risks)
+            st.markdown("**Drafting Tools**")
+            drafting = st.radio(
+                "Choose one",
+                ["Draft follow-up email", "Call agenda", "Strategy summary"],
+                key="kg_drafting_choice",
+                label_visibility="collapsed",
+            )
+            if drafting == "Draft follow-up email":
+                outcome_optional = st.text_input("Call outcome (optional)", value="", key="kg_email_outcome", placeholder="e.g. Agreed next steps")
+                use_slm = st.checkbox("Use local SLM to polish", value=False, key="kg_email_slm")
+                if num_signals >= _MIN_SIGNALS_FOR_FIT:
+                    if use_slm:
+                        _render_email_with_slm(current_client, signals, outcome_optional)
+                    else:
+                        draft = tpl.render_followup_email_template(signals, outcome_optional, current_client or "there")
+                        st.text_area("Email draft", value=draft, height=180, key="kg_email_draft")
+            elif drafting == "Call agenda":
+                if num_signals >= _MIN_SIGNALS_FOR_FIT:
+                    st.markdown(tpl.render_call_plan(signals))
+            elif drafting == "Strategy summary":
+                if num_signals >= _MIN_SIGNALS_FOR_FIT:
+                    st.markdown(tpl.render_client_summary(signals))
     else:
-        st.caption("Upload a PDF and enter a client name, then click Build Insights.")
-        # Still show graph section with client selector from graph
+        st.caption("Upload a PDF and enter a client name, then click **Generate Fit Report**.")
         G = _cached_load_graph()
         clients_in_g = viz.get_clients_in_graph(G)
         if clients_in_g:
-            st.subheader("Interactive Graph view")
-            st.caption("Select a client that has graph data to view the graph.")
-            sel = st.selectbox("Client", clients_in_g, key="kg_graph_client_empty")
-            if sel:
-                _render_interactive_graph_view(sel, [], [], [])
+            with st.expander("Advanced — View graph for existing client", expanded=False):
+                sel = st.selectbox("Client", clients_in_g, key="kg_graph_client_empty")
+                if sel:
+                    _render_interactive_graph_view(sel, [], [], [])
 
 
 def _render_email_with_slm(current_client: str, signals: dict, outcome_text: str):
