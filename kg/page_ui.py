@@ -96,125 +96,212 @@ def render():
     st.title("Career & Business Fit")
     st.caption("Upload a personality report to generate top career and business fits with evidence-backed rationale.")
 
-    # Workflow: Upload + Client + optional Business Type
-    st.subheader("Workflow")
-    pdf_file = st.file_uploader("Personality Report (PDF)", type=["pdf"], key="kg_pdf")
-    client_name = st.text_input("Client Name", value="", key="kg_client_name", placeholder="Required")
-    business_type = st.selectbox(
-        "Business Type (optional)",
-        ["", "IT Services", "Healthcare Consulting", "Financial Advisory", "Marketing Agency", "Legal Services", "Other"],
-        key="kg_business_type",
-    )
-    build_clicked = st.button("Generate Fit Report", type="primary", key="kg_build")
+    # Session state: no auto-load; results only after explicit Generate or Load
+    if "kg_has_results" not in st.session_state:
+        st.session_state["kg_has_results"] = False
+    if "kg_active_client_slug" not in st.session_state:
+        st.session_state["kg_active_client_slug"] = None
+    if "kg_active_doc_id" not in st.session_state:
+        st.session_state["kg_active_doc_id"] = None
+    if "kg_last_action" not in st.session_state:
+        st.session_state["kg_last_action"] = None
+    if "kg_extraction" not in st.session_state:
+        st.session_state["kg_extraction"] = None
+    if "kg_debug_info" not in st.session_state:
+        st.session_state["kg_debug_info"] = {}
+    if "kg_result_client_name" not in st.session_state:
+        st.session_state["kg_result_client_name"] = None
+
+    # Reset button (always visible when we have results)
+    if st.session_state.get("kg_has_results"):
+        if st.button("Clear / Reset", key="kg_reset"):
+            st.session_state["kg_has_results"] = False
+            st.session_state["kg_active_client_slug"] = None
+            st.session_state["kg_active_doc_id"] = None
+            st.session_state["kg_last_action"] = None
+            st.session_state["kg_extraction"] = None
+            st.session_state["kg_debug_info"] = {}
+            st.session_state["kg_result_client_name"] = None
+            st.rerun()
+
+    # Tabs: New Report | Load Existing
+    tab_new, tab_load = st.tabs(["New Report", "Load Existing"])
 
     extraction = None
-    current_client = (client_name or "").strip()
+    current_client = None
     debug_info = {}
 
-    if build_clicked and pdf_file is not None and current_client:
-        with st.spinner("Extracting insights..."):
-            pdf_bytes = pdf_file.read()
-            doc_id = stg.doc_id_from_bytes(pdf_bytes)
-            client_slug = _client_slug(current_client)
-            stg.ensure_dirs()
-            save_path = stg.save_upload(client_slug, pdf_file.name, pdf_bytes)
+    with tab_new:
+        st.subheader("New Report")
+        pdf_file = st.file_uploader("Personality Report (PDF)", type=["pdf"], key="kg_pdf")
+        client_name_new = st.text_input("Client Name", value="", key="kg_client_name", placeholder="Required")
+        current_client = (client_name_new or "").strip()
+        # Clear results if user changed client name (demo-safe: no stale report)
+        if st.session_state.get("kg_has_results") and st.session_state.get("kg_result_client_name"):
+            if current_client != st.session_state.get("kg_result_client_name"):
+                st.session_state["kg_has_results"] = False
+                st.session_state["kg_active_client_slug"] = None
+                st.session_state["kg_active_doc_id"] = None
+                st.session_state["kg_last_action"] = None
+                st.session_state["kg_extraction"] = None
+                st.session_state["kg_debug_info"] = {}
+                st.session_state["kg_result_client_name"] = None
+        business_type = st.selectbox(
+            "Business Type (optional)",
+            ["", "IT Services", "Healthcare Consulting", "Financial Advisory", "Marketing Agency", "Legal Services", "Other"],
+            key="kg_business_type",
+        )
+        build_clicked = st.button("Generate Fit Report", type="primary", key="kg_build")
 
-            # Already processed: doc_id in client index, or legacy: facts exist for this client+doc_id
-            already_processed = stg.client_has_doc_id(current_client, doc_id)
-            if not already_processed:
-                legacy_facts = stg.load_facts_for_client(current_client, doc_id=doc_id)
-                if legacy_facts:
-                    already_processed = True
-                    stg.register_processed_doc(client_slug, current_client, doc_id, str(save_path), len(legacy_facts), graph_updated=True)
-            if already_processed:
-                st.info("This report was already processed for this client. No duplicate facts added. Loading from graph.")
-                G = bg.load_graph()
-                if G.number_of_nodes() == 0 and stg.FACTS_JSONL.exists():
-                    G = bg.rebuild_graph_from_facts()
-                    bg.save_graph(G)
-                    _cached_load_graph.clear()
-                    _cached_agraph_elements.clear()
+        if build_clicked and pdf_file is not None and current_client:
+            with st.spinner("Extracting insights..."):
+                pdf_bytes = pdf_file.read()
+                doc_id = stg.doc_id_from_bytes(pdf_bytes)
+                client_slug = _client_slug(current_client)
+                stg.ensure_dirs()
+                save_path = stg.save_upload(client_slug, pdf_file.name, pdf_bytes)
+
+                already_processed = stg.client_has_doc_id(current_client, doc_id)
+                if not already_processed:
+                    legacy_facts = stg.load_facts_for_client(current_client, doc_id=doc_id)
+                    if legacy_facts:
+                        already_processed = True
+                        stg.register_processed_doc(client_slug, current_client, doc_id, str(save_path), len(legacy_facts), graph_updated=True)
+                if already_processed:
+                    st.info("This report was already processed for this client. No duplicate facts added. Loading from graph.")
                     G = bg.load_graph()
-                facts_from_file = stg.load_facts_for_client(current_client, doc_id=doc_id)
-                if facts_from_file:
-                    extraction = {
-                        "client_name": current_client,
-                        "doc_id": doc_id,
-                        "facts": [{"type": f.get("type"), "label": f.get("label"), "evidence": f.get("evidence")} for f in facts_from_file],
-                    }
-                else:
-                    tdr = bg.get_client_traits_drivers_risks(G, current_client)
-                    extraction = {"client_name": current_client, "doc_id": doc_id, "facts": []}
-                    for item in tdr.get("traits") or []:
-                        extraction["facts"].append({"type": "trait", "label": item.get("label"), "evidence": item.get("evidence")})
-                    for item in tdr.get("drivers") or []:
-                        extraction["facts"].append({"type": "driver", "label": item.get("label"), "evidence": item.get("evidence")})
-                    for item in tdr.get("risks") or []:
-                        extraction["facts"].append({"type": "risk", "label": item.get("label"), "evidence": item.get("evidence")})
-                debug_info = _build_debug_info(current_client, doc_id, extraction, G, pdf_bytes)
-            else:
-                extraction = ext.extract_facts(current_client, doc_id, pdf_bytes)
-                if extraction.get("extraction_status") == "text_extraction_failed":
-                    st.error(extraction.get("extraction_message") or "Text extraction failed. Please upload a text-based PDF.")
-                    debug_info = _build_debug_info(current_client, doc_id, extraction, bg.load_graph(), pdf_bytes)
-                else:
-                    num_facts = len(extraction.get("facts") or [])
-                    for fact in extraction.get("facts") or []:
-                        row = {
-                            "client_slug": client_slug,
-                            "client_display_name": current_client,
+                    if G.number_of_nodes() == 0 and stg.FACTS_JSONL.exists():
+                        G = bg.rebuild_graph_from_facts()
+                        bg.save_graph(G)
+                        _cached_load_graph.clear()
+                        _cached_agraph_elements.clear()
+                        G = bg.load_graph()
+                    facts_from_file = stg.load_facts_for_client(current_client, doc_id=doc_id)
+                    if facts_from_file:
+                        extraction = {
                             "client_name": current_client,
                             "doc_id": doc_id,
-                            "type": fact.get("type"),
-                            "label": fact.get("label"),
-                            "evidence": fact.get("evidence"),
+                            "facts": [{"type": f.get("type"), "label": f.get("label"), "evidence": f.get("evidence")} for f in facts_from_file],
                         }
-                        stg.append_fact(row)
-                    G = bg.load_graph()
-                    G = bg.merge_facts_into_graph(G, extraction)
-                    bg.save_graph(G)
-                    stg.register_processed_doc(client_slug, current_client, doc_id, str(save_path), num_facts, graph_updated=True)
-                    _cached_load_graph.clear()
-                    _cached_agraph_elements.clear()
+                    else:
+                        tdr = bg.get_client_traits_drivers_risks(G, current_client)
+                        extraction = {"client_name": current_client, "doc_id": doc_id, "facts": []}
+                        for item in tdr.get("traits") or []:
+                            extraction["facts"].append({"type": "trait", "label": item.get("label"), "evidence": item.get("evidence")})
+                        for item in tdr.get("drivers") or []:
+                            extraction["facts"].append({"type": "driver", "label": item.get("label"), "evidence": item.get("evidence")})
+                        for item in tdr.get("risks") or []:
+                            extraction["facts"].append({"type": "risk", "label": item.get("label"), "evidence": item.get("evidence")})
                     debug_info = _build_debug_info(current_client, doc_id, extraction, G, pdf_bytes)
-                    st.success("Report generated.")
-    elif build_clicked and not current_client:
-        st.warning("Please enter a client name.")
-    elif build_clicked and pdf_file is None:
-        st.warning("Please upload a PDF.")
+                    st.session_state["kg_has_results"] = True
+                    st.session_state["kg_active_client_slug"] = client_slug
+                    st.session_state["kg_active_doc_id"] = doc_id
+                    st.session_state["kg_last_action"] = "generate"
+                    st.session_state["kg_extraction"] = extraction
+                    st.session_state["kg_debug_info"] = debug_info
+                    st.session_state["kg_result_client_name"] = current_client
+                else:
+                    extraction = ext.extract_facts(current_client, doc_id, pdf_bytes)
+                    if extraction.get("extraction_status") == "text_extraction_failed":
+                        st.error(extraction.get("extraction_message") or "Text extraction failed. Please upload a text-based PDF.")
+                        debug_info = _build_debug_info(current_client, doc_id, extraction, bg.load_graph(), pdf_bytes)
+                    else:
+                        num_facts = len(extraction.get("facts") or [])
+                        for fact in extraction.get("facts") or []:
+                            row = {
+                                "client_slug": client_slug,
+                                "client_display_name": current_client,
+                                "client_name": current_client,
+                                "doc_id": doc_id,
+                                "type": fact.get("type"),
+                                "label": fact.get("label"),
+                                "evidence": fact.get("evidence"),
+                            }
+                            stg.append_fact(row)
+                        G = bg.load_graph()
+                        G = bg.merge_facts_into_graph(G, extraction)
+                        bg.save_graph(G)
+                        stg.register_processed_doc(client_slug, current_client, doc_id, str(save_path), num_facts, graph_updated=True)
+                        _cached_load_graph.clear()
+                        _cached_agraph_elements.clear()
+                        debug_info = _build_debug_info(current_client, doc_id, extraction, G, pdf_bytes)
+                        st.session_state["kg_has_results"] = True
+                        st.session_state["kg_active_client_slug"] = client_slug
+                        st.session_state["kg_active_doc_id"] = doc_id
+                        st.session_state["kg_last_action"] = "generate"
+                        st.session_state["kg_extraction"] = extraction
+                        st.session_state["kg_debug_info"] = debug_info
+                        st.session_state["kg_result_client_name"] = current_client
+                        st.success("Report generated.")
+        elif build_clicked and not current_client:
+            st.warning("Please enter a client name.")
+        elif build_clicked and pdf_file is None:
+            st.warning("Please upload a PDF.")
 
-    # If we have a client (from form or session), load their insights from graph or facts
-    if not extraction and current_client:
-        G = bg.load_graph()
-        if G.number_of_nodes() == 0 and stg.FACTS_JSONL.exists():
-            G = bg.rebuild_graph_from_facts()
-            bg.save_graph(G)
-            _cached_load_graph.clear()
-            _cached_agraph_elements.clear()
+    with tab_load:
+        st.subheader("Load Existing")
+        # Only load graph when user clicks Refresh (no load on initial render)
+        if "kg_client_list" not in st.session_state:
+            st.session_state["kg_client_list"] = []
+        if st.button("Refresh client list", key="kg_refresh_clients"):
             G = bg.load_graph()
-        if G.has_node(kg_ontology.client_id(current_client)):
-            extraction = {
-                "client_name": current_client,
-                "doc_id": "",
-                "facts": [],
-            }
-            tdr = bg.get_client_traits_drivers_risks(G, current_client)
-            for item in tdr.get("traits") or []:
-                extraction["facts"].append({"type": "trait", "label": item.get("label"), "evidence": item.get("evidence")})
-            for item in tdr.get("drivers") or []:
-                extraction["facts"].append({"type": "driver", "label": item.get("label"), "evidence": item.get("evidence")})
-            for item in tdr.get("risks") or []:
-                extraction["facts"].append({"type": "risk", "label": item.get("label"), "evidence": item.get("evidence")})
-        else:
-            facts_for_client = stg.load_facts_for_client(current_client)
-            if facts_for_client:
-                extraction = {
-                    "client_name": current_client,
-                    "doc_id": facts_for_client[0].get("doc_id", "") if facts_for_client else "",
-                    "facts": [{"type": f.get("type"), "label": f.get("label"), "evidence": f.get("evidence")} for f in facts_for_client],
-                }
+            if G.number_of_nodes() == 0 and stg.FACTS_JSONL.exists():
+                G = bg.rebuild_graph_from_facts()
+                bg.save_graph(G)
+                _cached_load_graph.clear()
+                _cached_agraph_elements.clear()
+                G = bg.load_graph()
+            st.session_state["kg_client_list"] = viz.get_clients_in_graph(G) or []
+            st.rerun()
+        client_options = ["— Select —"] + list(st.session_state["kg_client_list"])
+        selected_label = st.selectbox("Client", client_options, key="kg_load_select", index=0)
+        load_clicked = st.button("Load Existing Client", type="primary", key="kg_load_btn")
+        if load_clicked and selected_label and selected_label != "— Select —":
+            G = bg.load_graph()
+            if G.number_of_nodes() == 0 and stg.FACTS_JSONL.exists():
+                G = bg.rebuild_graph_from_facts()
+                bg.save_graph(G)
+                _cached_load_graph.clear()
+                _cached_agraph_elements.clear()
+                G = bg.load_graph()
+            load_client = selected_label
+            if G.has_node(kg_ontology.client_id(load_client)):
+                extraction = {"client_name": load_client, "doc_id": "", "facts": []}
+                tdr = bg.get_client_traits_drivers_risks(G, load_client)
+                for item in tdr.get("traits") or []:
+                    extraction["facts"].append({"type": "trait", "label": item.get("label"), "evidence": item.get("evidence")})
+                for item in tdr.get("drivers") or []:
+                    extraction["facts"].append({"type": "driver", "label": item.get("label"), "evidence": item.get("evidence")})
+                for item in tdr.get("risks") or []:
+                    extraction["facts"].append({"type": "risk", "label": item.get("label"), "evidence": item.get("evidence")})
+            else:
+                facts_for_client = stg.load_facts_for_client(load_client)
+                if facts_for_client:
+                    extraction = {"client_name": load_client, "doc_id": facts_for_client[0].get("doc_id", "") if facts_for_client else "", "facts": [{"type": f.get("type"), "label": f.get("label"), "evidence": f.get("evidence")} for f in facts_for_client]}
+                else:
+                    extraction = None
+            if extraction:
+                G = _cached_load_graph()
+                debug_info = _build_debug_info(load_client, extraction.get("doc_id") or "", extraction, G, None)
+                st.session_state["kg_has_results"] = True
+                st.session_state["kg_active_client_slug"] = _client_slug(load_client)
+                st.session_state["kg_active_doc_id"] = extraction.get("doc_id") or ""
+                st.session_state["kg_last_action"] = "load"
+                st.session_state["kg_extraction"] = extraction
+                st.session_state["kg_debug_info"] = debug_info
+                st.session_state["kg_result_client_name"] = load_client
+                st.success(f"Loaded data for {load_client}.")
+                st.rerun()
+            else:
+                st.warning("No data found for this client.")
 
-    if extraction:
+    # Use stored extraction only when user explicitly generated or loaded
+    if st.session_state.get("kg_has_results") and st.session_state.get("kg_extraction"):
+        extraction = st.session_state["kg_extraction"]
+        debug_info = st.session_state.get("kg_debug_info") or {}
+        current_client = extraction.get("client_name") or ""
+
+    if st.session_state.get("kg_has_results") and extraction:
         if not debug_info and current_client:
             G = _cached_load_graph()
             debug_info = _build_debug_info(current_client, extraction.get("doc_id") or "", extraction, G, None)
@@ -294,14 +381,7 @@ def render():
                 if num_signals >= _MIN_SIGNALS_FOR_FIT:
                     st.markdown(tpl.render_client_summary(signals))
     else:
-        st.caption("Upload a PDF and enter a client name, then click **Generate Fit Report**.")
-        G = _cached_load_graph()
-        clients_in_g = viz.get_clients_in_graph(G)
-        if clients_in_g:
-            with st.expander("Advanced — View graph for existing client", expanded=False):
-                sel = st.selectbox("Client", clients_in_g, key="kg_graph_client_empty")
-                if sel:
-                    _render_interactive_graph_view(sel, [], [], [])
+        st.caption("Upload a PDF and enter a client name, then click **Generate Fit Report**, or use **Load Existing** to open a prior client.")
 
 
 def _render_email_with_slm(current_client: str, signals: dict, outcome_text: str):
