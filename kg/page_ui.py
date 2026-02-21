@@ -23,6 +23,7 @@ from kg import fit_scoring as fit
 from kg import templates as tpl
 from kg import chat_context as chat_ctx
 from kg import chat_answer as chat_ans
+from kg import ollama_extract as ollama_ext
 
 _MIN_SIGNALS_FOR_FIT = 1
 
@@ -272,6 +273,25 @@ def render():
             ["", "IT Services", "Healthcare Consulting", "Financial Advisory", "Marketing Agency", "Legal Services", "Other"],
             key="kg_business_type",
         )
+        with st.expander("Advanced (Ollama fallback)", expanded=False):
+            use_ollama_scanned = st.checkbox(
+                "Use Ollama for scanned PDFs (multimodal fallback)",
+                value=True,
+                key="kg_use_ollama_scanned",
+                help="When text extraction fails (e.g. image-only PDF), try Ollama vision to extract insights.",
+            )
+            ollama_model = st.text_input(
+                "Ollama vision model",
+                value="llava",
+                key="kg_ollama_model",
+                help="Vision-capable model name (e.g. llava, minicpm-v, bakllava). Must be pulled in Ollama.",
+            )
+            use_ollama_even_text = st.checkbox(
+                "Use Ollama even for text PDFs",
+                value=False,
+                key="kg_use_ollama_even_text",
+                help="Run Ollama extraction on all PDFs. Default: only when text extraction fails.",
+            )
         build_clicked = st.button("Generate Fit Report", type="primary", key="kg_build")
 
         # Processing ONLY when Generate is clicked; use pending bytes, never auto-process on upload
@@ -330,9 +350,82 @@ def render():
                         st.session_state["kg_result_client_name"] = current_client
                     else:
                         extraction = ext.extract_facts(current_client, doc_id, pdf_bytes)
-                        if extraction.get("extraction_status") == "text_extraction_failed":
-                            st.error(extraction.get("extraction_message") or "Text extraction failed. Please upload a text-based PDF.")
+                        use_ollama_scanned = st.session_state.get("kg_use_ollama_scanned", True)
+                        use_ollama_even_text = st.session_state.get("kg_use_ollama_even_text", False)
+                        ollama_model = (st.session_state.get("kg_ollama_model") or "llava").strip() or "llava"
+
+                        if extraction.get("extraction_status") == "text_extraction_failed" and use_ollama_scanned:
+                            if not ollama_ext.ollama_available():
+                                st.error("Ollama not detected on localhost:11434. Start Ollama and retry.")
+                                debug_info = _build_debug_info(current_client, doc_id, extraction, bg.load_graph(), pdf_bytes)
+                            else:
+                                st.info("Text extraction failed (scanned PDF?). Trying Ollama vision...")
+                                extraction = ollama_ext.extract_facts_ollama(pdf_bytes, current_client, doc_id, model_name=ollama_model)
+                                if extraction.get("extraction_status") != "ok" or not extraction.get("facts"):
+                                    st.error(extraction.get("extraction_message") or "Ollama extraction failed. Try a text-based PDF or check the model.")
+                                    debug_info = _build_debug_info(current_client, doc_id, extraction, bg.load_graph(), pdf_bytes)
+                                else:
+                                    num_facts = len(extraction.get("facts") or [])
+                                    for fact in extraction.get("facts") or []:
+                                        row = {
+                                            "client_slug": client_slug,
+                                            "client_display_name": current_client,
+                                            "client_name": current_client,
+                                            "doc_id": doc_id,
+                                            "type": fact.get("type"),
+                                            "label": fact.get("label"),
+                                            "evidence": fact.get("evidence"),
+                                        }
+                                        stg.append_fact(row)
+                                    G = bg.load_graph()
+                                    G = bg.merge_facts_into_graph(G, extraction)
+                                    bg.save_graph(G)
+                                    stg.register_processed_doc(client_slug, current_client, doc_id, str(save_path), num_facts, graph_updated=True)
+                                    _cached_load_graph.clear()
+                                    _cached_agraph_elements.clear()
+                                    debug_info = _build_debug_info(current_client, doc_id, extraction, G, pdf_bytes)
+                                    st.session_state["kg_has_results"] = True
+                                    st.session_state["kg_active_client_slug"] = client_slug
+                                    st.session_state["kg_active_doc_id"] = doc_id
+                                    st.session_state["kg_last_action"] = "generate"
+                                    st.session_state["kg_extraction"] = extraction
+                                    st.session_state["kg_debug_info"] = debug_info
+                                    st.session_state["kg_result_client_name"] = current_client
+                                    st.success("Report generated (Ollama vision fallback).")
+                        elif extraction.get("extraction_status") == "text_extraction_failed":
+                            st.error(extraction.get("extraction_message") or "Text extraction failed. Enable 'Use Ollama for scanned PDFs' in Advanced to try vision fallback.")
                             debug_info = _build_debug_info(current_client, doc_id, extraction, bg.load_graph(), pdf_bytes)
+                        elif use_ollama_even_text and ollama_ext.ollama_available():
+                            ollama_extraction = ollama_ext.extract_facts_ollama(pdf_bytes, current_client, doc_id, model_name=ollama_model)
+                            if ollama_extraction.get("facts"):
+                                extraction = ollama_extraction
+                            num_facts = len(extraction.get("facts") or [])
+                            for fact in extraction.get("facts") or []:
+                                row = {
+                                    "client_slug": client_slug,
+                                    "client_display_name": current_client,
+                                    "client_name": current_client,
+                                    "doc_id": doc_id,
+                                    "type": fact.get("type"),
+                                    "label": fact.get("label"),
+                                    "evidence": fact.get("evidence"),
+                                }
+                                stg.append_fact(row)
+                            G = bg.load_graph()
+                            G = bg.merge_facts_into_graph(G, extraction)
+                            bg.save_graph(G)
+                            stg.register_processed_doc(client_slug, current_client, doc_id, str(save_path), num_facts, graph_updated=True)
+                            _cached_load_graph.clear()
+                            _cached_agraph_elements.clear()
+                            debug_info = _build_debug_info(current_client, doc_id, extraction, G, pdf_bytes)
+                            st.session_state["kg_has_results"] = True
+                            st.session_state["kg_active_client_slug"] = client_slug
+                            st.session_state["kg_active_doc_id"] = doc_id
+                            st.session_state["kg_last_action"] = "generate"
+                            st.session_state["kg_extraction"] = extraction
+                            st.session_state["kg_debug_info"] = debug_info
+                            st.session_state["kg_result_client_name"] = current_client
+                            st.success("Report generated.")
                         else:
                             num_facts = len(extraction.get("facts") or [])
                             for fact in extraction.get("facts") or []:
